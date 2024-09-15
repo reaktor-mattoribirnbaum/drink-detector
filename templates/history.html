@@ -1,13 +1,26 @@
 {% extends 'base.html' %}
 
-{% block title %}Feed{% endblock %}
+{% block title %}History{% endblock %}
 
 {% block content %}
-{% include 'capture.html' %}
+<div class="ui styled fluid accordion">
+  {% for objects, run, model, timestamp in captures %}
+  <div class="title {% if loop.first %}active{% endif %}">
+    <i class="dropdown icon"></i>
+    {{ timestamp }}
+  </div>
+  <div class="content {% if loop.first %}active{% endif %}">
+    {% set timestamp = None %}
+    {% include 'capture.html' %}
+  </div>
+  {% endfor %}
+</div>
 {% endblock %}
 
 {% block script %}
 <script>
+$(".ui.accordion").accordion();
+
 $(".annotations-checkbox").checkbox({
   onChecked: function() {
     const img = $(this).closest(".capture").find(".annotations-img");

@@ -1,0 +1,40 @@
+<div class="capture">
+  <div class="ui two column grid">
+    <div class="left floated column">
+      <h2 class="ui sub header">
+        Model: {{ model }} 
+        {% if timestamp != None %}
+        <br />
+        {{ timestamp }}
+        {% endif %}
+      </h2>
+    </div>
+    <div class="right floated right aligned column">
+      <div class="ui toggle checkbox annotations-checkbox">
+        <input type="checkbox" checked="checked" autocomplete="off">
+        <label>Annotations</label>
+      </div>
+    </div>
+    <div class="sixteen wide column">
+      <img class="ui image annotations-img" data-src="{{ url_for('image', run=run) }}" src="{{ url_for('image', run=run, annotated=True) }}">
+    </div>
+  </div>
+  <table class="ui celled table">
+    <thead>
+      <tr>
+        <th>Label</th>
+        <th>Confidence</th>
+        <th>Bounding Box</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for object in objects %}
+      <tr>
+        <td><code>{{ object.label }}</code></td>
+        <td><code>{{ object.score }}</code></td>
+        <td><code>{{ object.box }}</code></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -8,10 +8,10 @@
 </head>
 <body>
   <div class="ui secondary menu">
-    <a class="item {% if request.url_rule.endpoint == 'feed' %}active{% endif %}">
+    <a class="item {% if request.url_rule.endpoint == 'feed' %}active{% endif %}" href="{{ url_for('feed') }}">
       Feed
     </a>
-    <a class="item {% if request.url_rule.endpoint == 'history' %}active{% endif %}">
+    <a class="item {% if request.url_rule.endpoint == 'history' %}active{% endif %}" href="{{ url_for('history') }}">
       History
     </a>
   </div>
