@@ -27,15 +27,67 @@ import json
 # # occasionally results other than the query are produced
 # OTHER_COLOR = ImageColor.colormap["chocolate"]
 
+def open_capture_device(capture_device: int) -> cv.VideoCapture:
+    cap = cv.VideoCapture(capture_device)
+    if not cap.isOpened():
+        print("Cannot open camera")
+        exit()
+    return cap
+
+def capture_image(cap) -> Image:
+    ret, frame = cap.read()
+    if not ret:
+        raise "Couldn't read from camera"
+    # default color format for opencv is BGR for some reason
+    frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+    image = Image.fromarray(frame)
+    return image
+
+def process_image(image: Image, model, query: str, query_items, other_color, processor, device) -> (Image, dict):
+    draw = ImageDraw.Draw(image)
+
+    inputs = processor(images=image, text=query, return_tensors="pt").to(device)
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    results = processor.post_process_grounded_object_detection(
+        outputs,
+        inputs.input_ids,
+        box_threshold=0.3,
+        text_threshold=0.3,
+        target_sizes=[image.size[::-1]]
+    )
+
+    # only processed one image
+    result = results[0]
+    for score, label, box in zip(result["scores"], result["labels"], result["boxes"]):
+        print(
+                f"Detected {label} with confidence "
+                f"{round(score.item(), 3)} at location {box[0]}, {box[1]} to {box[2]}, {box[3]}"
+        )
+
+    font = ImageFont.load_default()
+
+    for score, label, box in zip(result["scores"], result["labels"], result["boxes"]):
+        color = query_items.get(label, other_color)
+        x, y, x2, y2 = tuple([round(i.item(), 2) for i in box])
+        print(x, y, x2, y2)
+        draw.rectangle((x, y, x2, y2), outline=color, width=1)
+        text = "{}: {}%".format(label, round(score.item() * 100, 3))
+        text_left, text_top, text_right, text_bottom = font.getbbox(text)
+        text_width = text_right - text_left
+        text_height = text_bottom - text_top
+        draw.rectangle((x, y, x + text_width, y + text_height), fill=color)
+        draw.text((x, y), text, fill="black")
+
+    return (image, result)
+
 def drink_detection(db_con, db_cur, config):
     query_items = dict(map(lambda item: tuple(item.split(":")[0:2]), config.QUERY.split(",")))
     query = " ".join(map(lambda key: "%s." % key, query_items.keys()))
 
     print("Opening camera")
-    cap = cv.VideoCapture(config.CAPTURE_DEVICE)
-    if not cap.isOpened():
-        print("Cannot open camera")
-        exit()
+    cap = open_capture_device(config.CAPTURE_DEVICE)
     print("Camera interface opened, setting up model")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -44,77 +96,31 @@ def drink_detection(db_con, db_cur, config):
     model = AutoModelForZeroShotObjectDetection.from_pretrained(config.MODEL).to(device)
     print("Model ready")
 
-    def capture_and_process(cap, query, query_items, other_color, processor, device):
-        ret, frame = cap.read()
-        if not ret:
-            raise "Couldn't read from camera"
-        # default color format for opencv is BGR for some reason
-        frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-        image = Image.fromarray(frame)
-        draw = ImageDraw.Draw(image)
-
-        inputs = processor(images=image, text=query, return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = model(**inputs)
-
-        results = processor.post_process_grounded_object_detection(
-            outputs,
-            inputs.input_ids,
-            box_threshold=0.3,
-            text_threshold=0.3,
-            target_sizes=[image.size[::-1]]
-        )
-
-        # only processed one image
-        result = results[0]
-        for score, label, box in zip(result["scores"], result["labels"], result["boxes"]):
-            print(
-                    f"Detected {label} with confidence "
-                    f"{round(score.item(), 3)} at location {box[0]}, {box[1]} to {box[2]}, {box[3]}"
-            )
-
-        font = ImageFont.load_default()
-
-        for score, label, box in zip(result["scores"], result["labels"], result["boxes"]):
-            color = query_items.get(label, other_color)
-            x, y, x2, y2 = tuple([round(i.item(), 2) for i in box])
-            print(x, y, x2, y2)
-            draw.rectangle((x, y, x2, y2), outline=color, width=1)
-            text = "{}: {}%".format(label, round(score.item() * 100, 3))
-            text_left, text_top, text_right, text_bottom = font.getbbox(text)
-            text_width = text_right - text_left
-            text_height = text_bottom - text_top
-            draw.rectangle((x, y, x + text_width, y + text_height), fill=color)
-            draw.text((x, y), text, fill="black")
-
-        return (frame, image, result)
-
-    def capture_loop():
-        while True:
-            print("Capturing and processing")
-            last_start = datetime.now()
-            (frame, image, result) = capture_and_process(cap, query, query_items, config.OTHER_COLOR, processor, device)
-            result = {
-                "scores": result['scores'].tolist(),
-                "labels": result['labels'],
-                "boxes": result['boxes'].tolist()
-            }
-            print("Saving results")
-            filename = "%s.png" % last_start.isoformat(timespec="seconds")
-
-            Image.fromarray(frame).save(os.path.join(config.ORIG_DIR, filename))
-            image.save(os.path.join(config.ANNO_DIR, filename))
-
-            db_cur.execute(
-                "INSERT INTO captures (model, result, filename, created_at) VALUES (?, ?, ?, ?)",
-                (config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
-            )
-            db_con.commit()
-            next = last_start + timedelta(seconds=config.RATE)
-            rem = max((next - datetime.now()).seconds, 0)
-            print("Finished, waiting until next start in %s seconds" % rem)
-            sleep(rem)
-
     print("Starting capture loop at rate of once per %s seconds" % config.RATE)
-    capture_loop()
+
+    while True:
+        print("Capturing and processing")
+        last_start = datetime.now()
+        orig_image = capture_image(cap)
+        (image, result) = process_image(orig_image.copy(), model, query, query_items, config.OTHER_COLOR, processor, device)
+        result = {
+            "scores": result['scores'].tolist(),
+            "labels": result['labels'],
+            "boxes": result['boxes'].tolist()
+        }
+        print("Saving results")
+        filename = "%s.png" % last_start.isoformat(timespec="seconds")
+
+        orig_image.save(os.path.join(config.ORIG_DIR, filename))
+        image.save(os.path.join(config.ANNO_DIR, filename))
+
+        db_cur.execute(
+            "INSERT INTO captures (model, result, filename, created_at) VALUES (?, ?, ?, ?)",
+            (config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
+        )
+        db_con.commit()
+        next = last_start + timedelta(seconds=config.RATE)
+        rem = max((next - datetime.now()).seconds, 0)
+        print("Finished, waiting until next start in %s seconds" % rem)
+        sleep(rem)
 
