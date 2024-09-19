@@ -8,7 +8,6 @@ import sqlite3
 import os
 import os.path
 import json
-from config import Config
 
 # # sqlite database to store results
 # DB_FILE = "drinks.db"
@@ -28,12 +27,12 @@ from config import Config
 # # occasionally results other than the query are produced
 # OTHER_COLOR = ImageColor.colormap["chocolate"]
 
-def capture(db_con, db_cur):
-    query_items = dict(map(lambda item: tuple(item.split(":")[0:2]), Config.QUERY.split(",")))
+def drink_detection(db_con, db_cur, config):
+    query_items = dict(map(lambda item: tuple(item.split(":")[0:2]), config.QUERY.split(",")))
     query = " ".join(map(lambda key: "%s." % key, query_items.keys()))
 
     print("Opening camera")
-    cap = cv.VideoCapture(Config.CAPTURE_DEVICE)
+    cap = cv.VideoCapture(config.CAPTURE_DEVICE)
     if not cap.isOpened():
         print("Cannot open camera")
         exit()
@@ -41,8 +40,8 @@ def capture(db_con, db_cur):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    processor = AutoProcessor.from_pretrained(Config.MODEL)
-    model = AutoModelForZeroShotObjectDetection.from_pretrained(Config.MODEL).to(device)
+    processor = AutoProcessor.from_pretrained(config.MODEL)
+    model = AutoModelForZeroShotObjectDetection.from_pretrained(config.MODEL).to(device)
     print("Model ready")
 
     def capture_and_process(cap, query, query_items, other_color, processor, device):
@@ -94,7 +93,7 @@ def capture(db_con, db_cur):
         while True:
             print("Capturing and processing")
             last_start = datetime.now()
-            (frame, image, result) = capture_and_process(cap, query, query_items, Config.OTHER_COLOR, processor, device)
+            (frame, image, result) = capture_and_process(cap, query, query_items, config.OTHER_COLOR, processor, device)
             result = {
                 "scores": result['scores'].tolist(),
                 "labels": result['labels'],
@@ -103,19 +102,19 @@ def capture(db_con, db_cur):
             print("Saving results")
             filename = "%s.png" % last_start.isoformat(timespec="seconds")
 
-            Image.fromarray(frame).save(os.path.join(Config.ORIG_DIR, filename))
-            image.save(os.path.join(Config.ANNO_DIR, filename))
+            Image.fromarray(frame).save(os.path.join(config.ORIG_DIR, filename))
+            image.save(os.path.join(config.ANNO_DIR, filename))
 
             db_cur.execute(
                 "INSERT INTO captures (model, result, filename, created_at) VALUES (?, ?, ?, ?)",
-                (Config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
+                (config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
             )
             db_con.commit()
-            next = last_start + timedelta(seconds=Config.RATE)
+            next = last_start + timedelta(seconds=config.RATE)
             rem = max((next - datetime.now()).seconds, 0)
             print("Finished, waiting until next start in %s seconds" % rem)
             sleep(rem)
 
-    print("Starting capture loop at rate of once per %s seconds" % Config.RATE)
+    print("Starting capture loop at rate of once per %s seconds" % config.RATE)
     capture_loop()
 

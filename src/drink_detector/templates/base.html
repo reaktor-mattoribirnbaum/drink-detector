@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.js"></script>
 </head>
 <body>
-  <div class="ui secondary menu">
+  <div class="ui menu">
     <a class="item {% if request.url_rule.endpoint == 'feed' %}active{% endif %}" href="{{ url_for('feed') }}">
       Feed
     </a>

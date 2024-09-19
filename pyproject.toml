@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "drink-detector"
+version = "0.1.0"
+description = ""
+authors = ["Mattori Birnbaum <mattori.birnbaum@reaktor.com>"]
+readme = "README.md"
+packages = [{include = "drink_detector", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+quart = "^0.19.6"
+pillow = "^10.4.0"
+torch = "^2.4.1"
+transformers = "^4.44.2"
+opencv-python = "^4.10.0.84"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.scripts]
+start = "drink_detector:run"
+init_db = "drink_detector:init_db"
+capture = "drink_detector:capture"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
