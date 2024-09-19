@@ -14,11 +14,13 @@ torch = "^2.4.1"
 transformers = "^4.44.2"
 opencv-python = "^4.10.0.84"
 python-dotenv = "^1.0.1"
+hypercorn = "^0.17.3"
 
 [tool.poetry.scripts]
 start = "drink_detector:run"
 init_db = "drink_detector:init_db"
 capture = "drink_detector:capture"
+serve = "drink_detector:serve"
 
 [build-system]
 requires = ["poetry-core"]

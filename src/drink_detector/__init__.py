@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass, astuple, asdict
 from asyncio import Lock, Queue, CancelledError, Task, Event
 import asyncio
+import signal
 from typing import AsyncGenerator
 
 PAGINATION_SIZE = 10
@@ -56,43 +57,45 @@ class FeedBroker:
     async def publish(self, message: str) -> None:
         for conn in self.connections:
             await conn.put(message)
-        print("finish publish to %s clients" % len(self.connections))
 
-    async def subscribe(self) -> AsyncGenerator[str, None]:
+    def subscribe(self) -> Queue:
         conn = Queue()
         self.connections.add(conn)
+        return conn
+
+    def unsubscribe(self, conn: Queue) -> None:
         try:
-            while True:
-                yield await conn.get()
-        finally:
             self.connections.remove(conn)
+        except KeyError:
+            print("Tried unsubscribing with unknown queue!")
 
 broker = FeedBroker()
-update_check_cancel_event: Event = Event()
-update_check_task: Task
+feed_shutdown_event = Event()
 UPDATE_RATE = 10
 
 async def update_check():
     most_recent: int | None = None
     (db_con, db_cur) = connect_db()
+    shutdown_wait_task = asyncio.create_task(feed_shutdown_event.wait())
 
     try:
         while True:
-            print("update check")
+            print("Checking for feed updates...")
             row = db_cur.execute("SELECT id, model, result, filename, created_at FROM captures ORDER BY created_at DESC LIMIT 1").fetchone()
             if most_recent is not None and row["id"] > most_recent:
+                print("Update found, publishing")
                 await broker.publish(json.dumps(asdict(process_row(row))))
             most_recent = row["id"]
-            await asyncio.sleep(UPDATE_RATE)
+            await asyncio.wait((shutdown_wait_task,), timeout=UPDATE_RATE)
+            if feed_shutdown_event.is_set():
+                break
     finally:
         print("Update checker stopping")
         db_con.close()
 
-@app.while_serving
+@app.before_serving
 async def manage_update_check():
     app.add_background_task(update_check)
-    yield
-    update_check_cancel_event.set()
 
 def capture():
     print("Starting in capture mode")
@@ -160,11 +163,26 @@ async def feed_sse():
         abort(400)
 
     async def send_feed_updates():
-        print("Subscribing to broker")
-        async for msg in broker.subscribe():
-            print("Message from broker")
-            event = ServerSentEvent(msg)
-            yield event.encode()
+        print("Subscribing to feed")
+        subscription = broker.subscribe()
+        try:
+            subscription_task = asyncio.create_task(subscription.get())
+            cancel_event_task = asyncio.create_task(feed_shutdown_event.wait())
+            while True:
+                done, pending = await asyncio.wait((subscription_task, cancel_event_task), return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+                if feed_shutdown_event.is_set():
+                    print("Stopping feed due to shutdown")
+                    return
+                for task in done:
+                    if task is subscription_task:
+                        print("Sending feed update")
+                        event = ServerSentEvent(await task)
+                        yield event.encode()
+        except asyncio.CancelledError:
+            print("Feed connection closed")
+            broker.unsubscribe(subscription)
 
     res = await make_response(
         send_feed_updates(),
@@ -174,7 +192,6 @@ async def feed_sse():
             "Transfer-Encoding": "chunked"
         }
     )
-    res.timeout = None
     return res
 
 @app.route("/history")
@@ -186,5 +203,20 @@ async def history():
     captures = map(process_row, rows)
     return await render_template("history.html", captures=map(lambda cap: astuple(cap), captures))
 
+def _sig_handler(*_: any) -> None:
+    print("Shutting down server")
+    feed_shutdown_event.set()
+
 def run() -> None:
     app.run(debug=True)
+
+def serve() -> None:
+    import hypercorn.config
+    from hypercorn.asyncio import serve
+
+    config = hypercorn.config.Config()
+    config.bind = ["localhost:8080"]
+    loop = asyncio.get_event_loop()
+    loop.add_signal_handler(signal.SIGINT, _sig_handler)
+    # shutdown_trigger must be set or the SIGINT handler seems to get overwritten by Quart
+    loop.run_until_complete(serve(app, config, shutdown_trigger=feed_shutdown_event.wait))
