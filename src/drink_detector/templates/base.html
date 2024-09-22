@@ -8,12 +8,12 @@
 </head>
 <body>
   <div class="ui menu">
-    <a class="item {% if request.url_rule.endpoint == 'feed' %}active{% endif %}" href="{{ url_for('feed') }}">
-      Feed
+  {% set nav = [("feed", "Feed", []), ("history", "History", []), ("capture_request", "Request", ["capture_request_accept"])] %}
+  {% for (endpoint, text, other_endpoints) in nav %}
+    <a class="item {% if request.url_rule.endpoint in [endpoint] + other_endpoints %}active{% endif %}" href="{{ url_for(endpoint) }}">
+      {{ text }}
     </a>
-    <a class="item {% if request.url_rule.endpoint == 'history' %}active{% endif %}" href="{{ url_for('history') }}">
-      History
-    </a>
+  {% endfor %}
   </div>
   <div class="ui container">
     {% block content %}{% endblock %}

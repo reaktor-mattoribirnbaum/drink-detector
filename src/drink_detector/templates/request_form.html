@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+
+{% block title %}Capture Request{% endblock %}
+
+{% block content %}
+<form class="ui form" method="POST" enctype="multipart/form-data" action="{{ url_for('capture_request_accept') }}">
+  <h2 class="ui dividing header">Submit a picture to be processed</h2>
+  <div class="field">
+    <label>Model</label>
+    <input placeholder="{{ model }}" readonly type="text">
+  </div>
+  <div class="field">
+    <label>Image</label>
+    <div class="ui file input">
+      <input name="image" type="file">
+    </div>
+  </div>
+  <button class="ui button" type="submit">Submit</button>
+</form>
+{% endblock %}
+
+{% block script %}
+<script>
+const feedEventSource = new EventSource("/feed/sse");
+feedEventSource.onmessage = (event) => {
+  $.toast({
+    title: "New capture",
+    message: "Open feed page to display new capture data?",
+    displayTime: 0,
+    actions: [{
+      text: "Yes",
+      icon: "check",
+      class: "green",
+      click: () => {
+        window.location = "{{ url_for('feed') }}";
+      }
+    }, {
+      icon: "ban",
+      class: "icon red"
+    }]
+  });
+};
+</script>
+{% endblock %}

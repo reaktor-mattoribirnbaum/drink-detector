@@ -1,3 +1,4 @@
+from . import db
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 import torch
 from PIL import Image, ImageDraw, ImageFont, ImageColor
@@ -82,18 +83,49 @@ def process_image(image: Image, model, query: str, query_items, other_color, pro
 
     return (image, result)
 
-def drink_detection(db_con, db_cur, config):
+def setup_model(config):
     query_items = dict(map(lambda item: tuple(item.split(":")[0:2]), config.QUERY.split(",")))
     query = " ".join(map(lambda key: "%s." % key, query_items.keys()))
-
-    print("Opening camera")
-    cap = open_capture_device(config.CAPTURE_DEVICE)
-    print("Camera interface opened, setting up model")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     processor = AutoProcessor.from_pretrained(config.MODEL)
     model = AutoModelForZeroShotObjectDetection.from_pretrained(config.MODEL).to(device)
+    return (query_items, query, device, processor, model)
+
+def save_results(db_con, db_cur, config, orig_image, image, result, last_start) -> None:
+    result = {
+        "scores": result['scores'].tolist(),
+        "labels": result['labels'],
+        "boxes": result['boxes'].tolist()
+    }
+    print("Saving results")
+    filename = "%s.png" % last_start.isoformat(timespec="seconds")
+
+    orig_image.save(os.path.join(config.ORIG_DIR, filename))
+    image.save(os.path.join(config.ANNO_DIR, filename))
+
+    db_cur.execute(
+        "INSERT INTO captures (model, result, filename, created_at) VALUES (?, ?, ?, ?)",
+        (config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
+    )
+    db_con.commit()
+
+def setup_and_process_image(orig_image_file: os.PathLike, config):
+    orig_image = Image.open(orig_image_file)
+    (db_con, db_cur) = db.connect_db(config.DB)
+    (query_items, query, device, processor, model) = setup_model(config)
+    start = datetime.now()
+    (image, result) = process_image(orig_image, model, query, query_items, config.OTHER_COLOR, processor, device)
+    save_results(db_con, db_cur, config, orig_image, image, result, start)
+
+def drink_detection(config):
+    (db_con, db_cur) = db.connect_db(config.DB)
+    print("Opening camera")
+    cap = open_capture_device(config.CAPTURE_DEVICE)
+    print("Camera interface opened, setting up model")
+
+    (query_items, query, device, processor, model) = setup_model(config)
     print("Model ready")
 
     print("Starting capture loop at rate of once per %s seconds" % config.RATE)
@@ -103,22 +135,9 @@ def drink_detection(db_con, db_cur, config):
         last_start = datetime.now()
         orig_image = capture_image(cap)
         (image, result) = process_image(orig_image.copy(), model, query, query_items, config.OTHER_COLOR, processor, device)
-        result = {
-            "scores": result['scores'].tolist(),
-            "labels": result['labels'],
-            "boxes": result['boxes'].tolist()
-        }
-        print("Saving results")
-        filename = "%s.png" % last_start.isoformat(timespec="seconds")
 
-        orig_image.save(os.path.join(config.ORIG_DIR, filename))
-        image.save(os.path.join(config.ANNO_DIR, filename))
-
-        db_cur.execute(
-            "INSERT INTO captures (model, result, filename, created_at) VALUES (?, ?, ?, ?)",
-            (config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
-        )
-        db_con.commit()
+        save_results(db_con, db_cur, config, orig_image, image, result, last_start)
+        
         next = last_start + timedelta(seconds=config.RATE)
         rem = max((next - datetime.now()).seconds, 0)
         print("Finished, waiting until next start in %s seconds" % rem)

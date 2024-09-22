@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}Capture Request Accepted{% endblock %}
+
+{% block content %}
+<h2 class="ui header">
+  Request accepted, processing now...
+</h2>
+<a href="{{ url_for('feed') }}">
+  <button class="positive ui button">
+    Navigate to feed and wait for result
+  </button>
+</a>
+{% endblock %}
+
+{% block script %}
+<script>
+const feedEventSource = new EventSource("/feed/sse");
+feedEventSource.onmessage = (event) => {
+  $.toast({
+    title: "New capture",
+    message: "Open feed page to display new capture data?",
+    displayTime: 0,
+    actions: [{
+      text: "Yes",
+      icon: "check",
+      class: "green",
+      click: () => {
+        window.location = "{{ url_for('feed') }}";
+      }
+    }, {
+      icon: "ban",
+      class: "icon red"
+    }]
+  });
+};
+</script>
+{% endblock %}

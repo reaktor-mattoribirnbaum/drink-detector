@@ -1,32 +1,28 @@
 from .config import Config
-from .drink_detection import drink_detection
+from . import drink_detection, db
 import json
-from quart import Quart, g, render_template, request, url_for, send_from_directory, abort, make_response
+from quart import Quart, Request, g, render_template, request, url_for, send_from_directory, abort, make_response
 import os
 from datetime import datetime
 import sqlite3
+from PIL import Image
 from dataclasses import dataclass, astuple, asdict
 from asyncio import Lock, Queue, CancelledError, Task, Event
 import asyncio
 import signal
+from tempfile import NamedTemporaryFile
+from concurrent.futures import ProcessPoolExecutor
 from typing import AsyncGenerator
 
-PAGINATION_SIZE = 10
 
 app = Quart(__name__)
 app.config.from_object(Config)
 Config.setup()
-
-def connect_db():
-    db_con = sqlite3.connect(app.config["DB"])
-    db_con.row_factory = sqlite3.Row
-    db_cur = db_con.cursor()
-    db_cur.arraysize = PAGINATION_SIZE
-    return (db_con, db_cur)
+app.image_process_futures = []
 
 def get_db():
     if "db" not in g:
-        (db_con, db_cur) = connect_db()
+        (db_con, db_cur) = db.connect_db(app.config["DB"])
         g.db_con = db_con
         g.db_cur = db_cur
 
@@ -38,17 +34,8 @@ def close_db():
         db.close()
 
 def init_db():
-    (db_con, db_cur) = get_db()
-    db_cur.execute(
-        """CREATE TABLE IF NOT EXISTS captures (
-            id INTEGER PRIMARY KEY,
-            model TEXT NOT NULL,
-            result TEXT NOT NULL,
-            filename TEXT NOT NULL,
-            created_at INTEGER NOT NULL
-        )"""
-    )
-    db_con.commit()
+    (db_con, db_cur) = db.connect_db()
+    db.init_db(db_con, db_cur)
 
 class FeedBroker:
     def __init__(self) -> None:
@@ -71,11 +58,12 @@ class FeedBroker:
 
 broker = FeedBroker()
 feed_shutdown_event = Event()
+process_pool_executor = ProcessPoolExecutor()
 UPDATE_RATE = 10
 
 async def update_check():
     most_recent: int | None = None
-    (db_con, db_cur) = connect_db()
+    (db_con, db_cur) = db.connect_db(app.config["DB"])
     shutdown_wait_task = asyncio.create_task(feed_shutdown_event.wait())
 
     try:
@@ -99,8 +87,7 @@ async def manage_update_check():
 
 def capture():
     print("Starting in capture mode")
-    (db_con, db_cur) = connect_db()
-    drink_detection(db_con, db_cur, Config)
+    drink_detection.drink_detection(Config)
 
 @dataclass
 class CaptureRow:
@@ -138,6 +125,20 @@ class ServerSentEvent:
         message = f"{message}\n\n"
         return message.encode('utf-8')
 
+async def return_sse(gen: AsyncGenerator[str, None]) -> Request:
+    if "text/event-stream" not in request.accept_mimetypes:
+        abort(400)
+
+    res = await make_response(
+        gen(),
+        {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Transfer-Encoding": "chunked"
+        }
+    )
+    return res
+
 @app.route("/feed")
 async def feed():
     (db_con, db_cur) = get_db()
@@ -159,16 +160,15 @@ async def image(run):
 
 @app.route("/feed/sse")
 async def feed_sse():
-    if "text/event-stream" not in request.accept_mimetypes:
-        abort(400)
-
     async def send_feed_updates():
         print("Subscribing to feed")
         subscription = broker.subscribe()
+        subscription_task: Task
+        cancel_event_task: Task
         try:
-            subscription_task = asyncio.create_task(subscription.get())
-            cancel_event_task = asyncio.create_task(feed_shutdown_event.wait())
             while True:
+                subscription_task = asyncio.create_task(subscription.get())
+                cancel_event_task = asyncio.create_task(feed_shutdown_event.wait())
                 done, pending = await asyncio.wait((subscription_task, cancel_event_task), return_when=asyncio.FIRST_COMPLETED)
                 for task in pending:
                     task.cancel()
@@ -182,30 +182,53 @@ async def feed_sse():
                         yield event.encode()
         except asyncio.CancelledError:
             print("Feed connection closed")
+        finally:
             broker.unsubscribe(subscription)
+            subscription_task.cancel()
+            cancel_event_task.cancel()
 
-    res = await make_response(
-        send_feed_updates(),
-        {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Transfer-Encoding": "chunked"
-        }
-    )
-    return res
+    return await return_sse(send_feed_updates)
 
 @app.route("/history")
 async def history():
     (db_con, db_cur) = get_db()
-    rows = db_cur.execute("SELECT model, result, filename, created_at FROM captures ORDER BY created_at DESC LIMIT ?", (PAGINATION_SIZE,)).fetchmany()
+    rows = db_cur.execute("SELECT model, result, filename, created_at FROM captures ORDER BY created_at DESC LIMIT ?", (db.PAGINATION_SIZE,)).fetchmany()
     if len(rows) == 0:
         return render_template("empty_feed.html")
     captures = map(process_row, rows)
     return await render_template("history.html", captures=map(lambda cap: astuple(cap), captures))
 
+@app.route("/capture_request")
+async def capture_request():
+    return await render_template("request_form.html", model=app.config["MODEL"])
+
+@app.route("/capture_request", methods=["POST"])
+async def capture_request_accept():
+    out_temp = NamedTemporaryFile()
+    image = (await request.files)["image"]
+    await image.save(out_temp.name)
+    (db_con, db_cur) = get_db()
+    print("Starting image processing task")
+    process_future = asyncio.get_event_loop().run_in_executor(
+        process_pool_executor,
+        drink_detection.setup_and_process_image,
+        out_temp.name,
+        Config
+    )
+    def on_done(future):
+        print("Finished image processing task")
+        out_temp.close()
+        app.image_process_futures.remove(future)
+    process_future.add_done_callback(on_done)
+    app.image_process_futures.append(process_future)
+    return await render_template("request_accepted.html"), 202
+
 def _sig_handler(*_: any) -> None:
     print("Shutting down server")
     feed_shutdown_event.set()
+
+def process_pool_stopper() -> None:
+    process_pool_executor.shutdown()
 
 def run() -> None:
     app.run(debug=True)
