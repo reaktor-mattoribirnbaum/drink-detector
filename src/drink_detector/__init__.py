@@ -18,7 +18,7 @@ from typing import AsyncGenerator
 app = Quart(__name__)
 app.config.from_object(Config)
 Config.setup()
-app.image_process_futures = []
+app.image_process_futures = set()
 
 def get_db():
     if "db" not in g:
@@ -218,9 +218,9 @@ async def capture_request_accept():
     def on_done(future):
         print("Finished image processing task")
         out_temp.close()
-        app.image_process_futures.remove(future)
+        app.image_process_futures.discard(future)
     process_future.add_done_callback(on_done)
-    app.image_process_futures.append(process_future)
+    app.image_process_futures.add(process_future)
     return await render_template("request_accepted.html"), 202
 
 def _sig_handler(*_: any) -> None:
