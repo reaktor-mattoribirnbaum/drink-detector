@@ -1,5 +1,6 @@
 from .config import Config
-from . import drink_detection, db
+from . import drink_detection
+from .db import Db
 import json
 from quart import Quart, Request, g, render_template, request, url_for, send_from_directory, abort, make_response
 import os
@@ -20,13 +21,12 @@ app.config.from_object(Config)
 Config.setup()
 app.image_process_futures = set()
 
-def get_db():
+def get_db() -> Db:
     if "db" not in g:
-        (db_con, db_cur) = db.connect_db(app.config["DB"])
-        g.db_con = db_con
-        g.db_cur = db_cur
+        db = Db(app.config["DB"])
+        g.db = db
 
-    return (g.db_con, g.db_cur)
+    return g.db
 
 def close_db():
     db = g.pop("db", None)
@@ -34,8 +34,8 @@ def close_db():
         db.close()
 
 def init_db():
-    (db_con, db_cur) = db.connect_db()
-    db.init_db(db_con, db_cur)
+    db = Db(Config.DB)
+    db._init_db_()
 
 class FeedBroker:
     def __init__(self) -> None:
@@ -62,24 +62,31 @@ process_pool_executor = ProcessPoolExecutor()
 UPDATE_RATE = 10
 
 async def update_check():
-    most_recent: int | None = None
-    (db_con, db_cur) = db.connect_db(app.config["DB"])
+    most_recent: int
+    db = Db(app.config["DB"])
     shutdown_wait_task = asyncio.create_task(feed_shutdown_event.wait())
 
     try:
+        row = db.fetch_latest_capture()
+        if row is not None:
+            most_recent = row["created_at"]
+        else:
+            most_recent = 0
+
         while True:
             print("Checking for feed updates...")
-            row = db_cur.execute("SELECT id, model, result, filename, created_at FROM captures ORDER BY created_at DESC LIMIT 1").fetchone()
-            if most_recent is not None and row["id"] > most_recent:
-                print("Update found, publishing")
-                await broker.publish(json.dumps(asdict(process_row(row))))
-            most_recent = row["id"]
+            row = db.fetch_latest_capture()
+            if row is not None:
+                if row["created_at"] > most_recent:
+                    print("Update found, publishing")
+                    await broker.publish(row["created_at"])
+                most_recent = row["created_at"]
             await asyncio.wait((shutdown_wait_task,), timeout=UPDATE_RATE)
             if feed_shutdown_event.is_set():
                 break
     finally:
         print("Update checker stopping")
-        db_con.close()
+        db.close()
 
 @app.before_serving
 async def manage_update_check():
@@ -94,6 +101,7 @@ class CaptureRow:
     objects: list
     run: int
     model: str
+    created_by: str
     timestamp: str
 
 def process_row(row) -> CaptureRow:
@@ -104,6 +112,7 @@ def process_row(row) -> CaptureRow:
         objects=objects,
         run=row["created_at"],
         model=row["model"],
+        created_by=row["created_by"],
         timestamp=datetime.fromtimestamp(row["created_at"]).isoformat(sep=" ", timespec="seconds")
     )
 
@@ -141,17 +150,17 @@ async def return_sse(gen: AsyncGenerator[str, None]) -> Request:
 
 @app.route("/feed")
 async def feed():
-    (db_con, db_cur) = get_db()
-    row = db_cur.execute("SELECT model, result, filename, created_at FROM captures ORDER BY created_at DESC LIMIT 1").fetchone()
+    db = get_db()
+    row = db.fetch_latest_capture()
     if row is None:
-        return render_template("empty_feed.html")
+        return await render_template("empty_feed.html")
     objects = process_row(row)
     return await render_template("feed.html", **asdict(objects))
 
 @app.route("/image/<run>")
 async def image(run):
-    (db_con, db_cur) = get_db()
-    row = db_cur.execute("SELECT filename FROM captures WHERE created_at = ?", (run,)).fetchone()
+    db = get_db()
+    row = db.fetch_image(run)
     if "annotated" in request.args:
         dir = app.config["ANNO_DIR"]
     else:
@@ -191,10 +200,10 @@ async def feed_sse():
 
 @app.route("/history")
 async def history():
-    (db_con, db_cur) = get_db()
-    rows = db_cur.execute("SELECT model, result, filename, created_at FROM captures ORDER BY created_at DESC LIMIT ?", (db.PAGINATION_SIZE,)).fetchmany()
+    db = get_db()
+    rows = db.fetch_captures()
     if len(rows) == 0:
-        return render_template("empty_feed.html")
+        return await render_template("empty_feed.html")
     captures = map(process_row, rows)
     return await render_template("history.html", captures=map(lambda cap: astuple(cap), captures))
 
@@ -207,7 +216,6 @@ async def capture_request_accept():
     out_temp = NamedTemporaryFile()
     image = (await request.files)["image"]
     await image.save(out_temp.name)
-    (db_con, db_cur) = get_db()
     print("Starting image processing task")
     process_future = asyncio.get_event_loop().run_in_executor(
         process_pool_executor,

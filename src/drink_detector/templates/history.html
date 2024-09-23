@@ -4,13 +4,17 @@
 
 {% block content %}
 <div class="ui styled fluid accordion">
-  {% for objects, run, model, timestamp in captures %}
-  <div class="title {% if loop.first %}active{% endif %}">
+  {% for objects, run, model, created_by, timestamp in captures %}
+  <div class="title {% if loop.first %}active{% endif %}" style="position: relative">
     <i class="dropdown icon"></i>
+    <div class="ui {{ created_by.label_type }} horizontal label">
+      <i class="{{ created_by.label_class }}"></i> {{ created_by.title }}
+    </div>
     {{ timestamp }}
   </div>
   <div class="content {% if loop.first %}active{% endif %}">
     {% set timestamp = None %}
+    {% set created_by = None %}
     {% include 'capture.html' %}
   </div>
   {% endfor %}

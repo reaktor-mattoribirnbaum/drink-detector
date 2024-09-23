@@ -1,4 +1,4 @@
-from . import db
+from .db import Db, CaptureCreatedBy
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 import torch
 from PIL import Image, ImageDraw, ImageFont, ImageColor
@@ -10,23 +10,6 @@ import os
 import os.path
 import json
 
-# # sqlite database to store results
-# DB_FILE = "drinks.db"
-# # directory to store images
-# IMAGE_OUT = "drinks_out"
-# # number of video capture device, usually starts at 0
-# CAPTURE_DEVICE = 0
-# # seconds between captures
-# CAPTURE_RATE = 60.0
-
-# # dict of items to query for and the colors for their annotations
-# QUERY_ITEMS = {
-#     "a can": ImageColor.colormap["azure"],
-#     "a bottle": ImageColor.colormap["fuchsia"],
-#     "a juice box": ImageColor.colormap["tomato"]
-# }
-# # occasionally results other than the query are produced
-# OTHER_COLOR = ImageColor.colormap["chocolate"]
 
 def open_capture_device(capture_device: int) -> cv.VideoCapture:
     cap = cv.VideoCapture(capture_device)
@@ -93,7 +76,7 @@ def setup_model(config):
     model = AutoModelForZeroShotObjectDetection.from_pretrained(config.MODEL).to(device)
     return (query_items, query, device, processor, model)
 
-def save_results(db_con, db_cur, config, orig_image, image, result, last_start) -> None:
+def save_results(db: Db, config, orig_image, image, result, last_start, created_by: CaptureCreatedBy) -> None:
     result = {
         "scores": result['scores'].tolist(),
         "labels": result['labels'],
@@ -105,22 +88,20 @@ def save_results(db_con, db_cur, config, orig_image, image, result, last_start) 
     orig_image.save(os.path.join(config.ORIG_DIR, filename))
     image.save(os.path.join(config.ANNO_DIR, filename))
 
-    db_cur.execute(
-        "INSERT INTO captures (model, result, filename, created_at) VALUES (?, ?, ?, ?)",
-        (config.MODEL, json.dumps(result), filename, datetime.now().timestamp())
+    db.insert_capture(
+        config.MODEL, json.dumps(result), filename, created_by, datetime.now().timestamp()
     )
-    db_con.commit()
 
 def setup_and_process_image(orig_image_file: os.PathLike, config):
     orig_image = Image.open(orig_image_file)
-    (db_con, db_cur) = db.connect_db(config.DB)
+    db = Db(config.DB)
     (query_items, query, device, processor, model) = setup_model(config)
     start = datetime.now()
     (image, result) = process_image(orig_image, model, query, query_items, config.OTHER_COLOR, processor, device)
-    save_results(db_con, db_cur, config, orig_image, image, result, start)
+    save_results(db, config, orig_image, image, result, start, CaptureCreatedBy.REQUEST)
 
 def drink_detection(config):
-    (db_con, db_cur) = db.connect_db(config.DB)
+    db = Db(config.DB)
     print("Opening camera")
     cap = open_capture_device(config.CAPTURE_DEVICE)
     print("Camera interface opened, setting up model")
@@ -136,7 +117,7 @@ def drink_detection(config):
         orig_image = capture_image(cap)
         (image, result) = process_image(orig_image.copy(), model, query, query_items, config.OTHER_COLOR, processor, device)
 
-        save_results(db_con, db_cur, config, orig_image, image, result, last_start)
+        save_results(db, config, orig_image, image, result, last_start, CaptureCreatedBy.LOOP)
         
         next = last_start + timedelta(seconds=config.RATE)
         rem = max((next - datetime.now()).seconds, 0)
