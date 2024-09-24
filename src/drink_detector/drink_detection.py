@@ -9,6 +9,7 @@ import sqlite3
 import os
 import os.path
 import json
+import asyncio
 
 
 def open_capture_device(capture_device: int) -> cv.VideoCapture:
@@ -97,30 +98,33 @@ def setup_and_process_image(orig_image_file: os.PathLike, config):
     db = Db(config.DB)
     (query_items, query, device, processor, model) = setup_model(config)
     start = datetime.now()
-    (image, result) = process_image(orig_image, model, query, query_items, config.OTHER_COLOR, processor, device)
+    (image, result) = process_image(orig_image.copy(), model, query, query_items, config.OTHER_COLOR, processor, device)
     save_results(db, config, orig_image, image, result, start, CaptureCreatedBy.REQUEST)
 
 def drink_detection(config):
-    db = Db(config.DB)
-    print("Opening camera")
-    cap = open_capture_device(config.CAPTURE_DEVICE)
-    print("Camera interface opened, setting up model")
+    try:
+        db = Db(config.DB)
+        print("Opening camera")
+        cap = open_capture_device(config.CAPTURE_DEVICE)
+        print("Camera interface opened, setting up model")
 
-    (query_items, query, device, processor, model) = setup_model(config)
-    print("Model ready")
+        (query_items, query, device, processor, model) = setup_model(config)
+        print("Model ready")
 
-    print("Starting capture loop at rate of once per %s seconds" % config.RATE)
+        print("Starting capture loop at rate of once per %s seconds" % config.RATE)
 
-    while True:
-        print("Capturing and processing")
-        last_start = datetime.now()
-        orig_image = capture_image(cap)
-        (image, result) = process_image(orig_image.copy(), model, query, query_items, config.OTHER_COLOR, processor, device)
+        while True:
+            print("Capturing and processing")
+            last_start = datetime.now()
+            orig_image = capture_image(cap)
+            (image, result) = process_image(orig_image.copy(), model, query, query_items, config.OTHER_COLOR, processor, device)
 
-        save_results(db, config, orig_image, image, result, last_start, CaptureCreatedBy.LOOP)
+            save_results(db, config, orig_image, image, result, last_start, CaptureCreatedBy.LOOP)
         
-        next = last_start + timedelta(seconds=config.RATE)
-        rem = max((next - datetime.now()).seconds, 0)
-        print("Finished, waiting until next start in %s seconds" % rem)
-        sleep(rem)
+            next = last_start + timedelta(seconds=config.RATE)
+            rem = max((next - datetime.now()).seconds, 0)
+            print("Finished, waiting until next start in %s seconds" % rem)
+            sleep(rem)
+    except asyncio.CancelledError:
+        print("Capture loop task cancelled")
 
