@@ -22,6 +22,7 @@
     </h3>
     {% endif %}
     <img class="ui image annotations-img" data-src="{{ url_for('image', run=run) }}" src="{{ url_for('image', run=run, annotated=True) }}">
+    <link rel="preload" as="image" href="{{ url_for('image', run=run) }}" />
   </div>
 </div>
 <table class="ui celled table">

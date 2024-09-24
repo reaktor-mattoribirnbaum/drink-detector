@@ -13,11 +13,11 @@
 $(".annotations-checkbox").checkbox({
   onChecked: function() {
     const img = $(this).closest(".capture").find(".annotations-img");
-    img.attr("src", img.attr("data-src") + "?annotated");
+    img.attr("src", img.data("src") + "?annotated");
   },
   onUnchecked: function() {
     const img = $(this).closest(".capture").find(".annotations-img");
-    img.attr("src", img.attr("data-src"));
+    img.attr("src", img.data("src"));
   }
 });
 
