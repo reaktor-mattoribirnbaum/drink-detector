@@ -8,16 +8,60 @@
 </head>
 <body>
   <div class="ui menu">
-  {% set nav = [("feed", "Feed", []), ("history", "History", []), ("capture_request", "Request", ["capture_request_accept"])] %}
-  {% for (endpoint, text, other_endpoints) in nav %}
+  {% for (endpoint, text, other_endpoints) in _nav %}
     <a class="item {% if request.url_rule.endpoint in [endpoint] + other_endpoints %}active{% endif %}" href="{{ url_for(endpoint) }}">
       {{ text }}
     </a>
   {% endfor %}
+    <div class="right menu">
+      <div class="item">
+        <button class="ui toggle {% if _capture_task_active %}active{% endif %} labeled icon button" id="capture-loop-toggle">
+          <i class="cog {% if _capture_task_active %}active{% endif %} icon"></i>
+          <span>Capture Loop </span>
+          {% set text_on = "On" %}
+          {% set text_off = "Off" %}
+          <span id="capture-loop-toggle-text" data-on="{{ text_on }}" data-off="{{ text_off }}">{% if _capture_task_active %}{{ text_on }}{% else %}{{ text_off }}{% endif %}</span>
+        </button>
+      </div>
+    </div>
   </div>
   <div class="ui container">
     {% block content %}{% endblock %}
   </div>
   {% block script %}{% endblock %}
+  <script>
+  $("#capture-loop-toggle")
+    .data("active", {% if _capture_task_active %}true{% else %}false{% endif %})
+    .on("click", function() {
+      const text = $(this).children("#capture-loop-toggle-text");
+      if ($(this).data("active")) {
+        $(this)
+          .data("active", false)
+          .removeClass("active");
+        $(this)
+          .children("i")
+          .removeClass("active");
+        text
+          .text(text.data("off"));
+        $.ajax({
+          url: "{{ url_for('capture_loop_off') }}",
+          method: "PUT"
+        });
+      } else {
+        $(this)
+          .data("active", true)
+          .addClass("active");
+        $(this)
+          .children("i")
+          .addClass("active");
+        text
+          .text(text.data("on"));
+        $.ajax({
+          url: "{{ url_for('capture_loop_on') }}",
+          method: "PUT"
+        });
+      }
+    });
+  </script>
 </body>
 </html>
