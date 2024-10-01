@@ -1,7 +1,9 @@
-from .db import Db
 import asyncio
 
+from .db import Db
+
 UPDATE_RATE = 10
+
 
 class FeedBroker:
     def __init__(self) -> None:
@@ -23,17 +25,19 @@ class FeedBroker:
             print("Tried unsubscribing with unknown queue!")
 
 
-async def update_check(db_url: str, broker: FeedBroker, feed_shutdown_event: asyncio.Event, update_rate=UPDATE_RATE):
+async def update_check(
+    db_url: str,
+    broker: FeedBroker,
+    feed_shutdown_event: asyncio.Event,
+    update_rate=UPDATE_RATE,
+):
     most_recent: int
     db = Db(db_url)
     shutdown_wait_task = asyncio.create_task(feed_shutdown_event.wait())
 
     try:
         row = db.fetch_latest_capture()
-        if row is not None:
-            most_recent = row["created_at"]
-        else:
-            most_recent = 0
+        most_recent = row["created_at"] if row is not None else 0
 
         while True:
             print("Checking for feed updates...")

@@ -1,9 +1,11 @@
-from .broker import FeedBroker
-from dataclasses import dataclass, astuple, asdict
-from quart import Request, abort, request, make_response
-from typing import AsyncGenerator
-from functools import partial
 import asyncio
+from dataclasses import dataclass
+from functools import partial
+from typing import AsyncGenerator
+
+from quart import Request, abort, make_response, request
+
+from .broker import FeedBroker
 
 
 @dataclass
@@ -22,7 +24,7 @@ class ServerSentEvent:
         if self.retry is not None:
             message = f"{message}\nretry: {self.retry}"
         message = f"{message}\n\n"
-        return message.encode('utf-8')
+        return message.encode("utf-8")
 
 
 async def return_sse(gen: AsyncGenerator[str, None]) -> Request:
@@ -34,8 +36,8 @@ async def return_sse(gen: AsyncGenerator[str, None]) -> Request:
         {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
-            "Transfer-Encoding": "chunked"
-        }
+            "Transfer-Encoding": "chunked",
+        },
     )
     return res
 
@@ -49,7 +51,10 @@ async def _send_feed_updates(broker: FeedBroker, feed_shutdown_event: asyncio.Ev
         while True:
             subscription_task = asyncio.create_task(subscription.get())
             cancel_event_task = asyncio.create_task(feed_shutdown_event.wait())
-            done, pending = await asyncio.wait((subscription_task, cancel_event_task), return_when=asyncio.FIRST_COMPLETED)
+            done, pending = await asyncio.wait(
+                (subscription_task, cancel_event_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
             for task in pending:
                 task.cancel()
             if feed_shutdown_event.is_set():

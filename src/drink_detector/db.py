@@ -1,7 +1,7 @@
-import sqlite3
 import enum
 import json
-from dataclasses import dataclass, asdict, astuple
+import sqlite3
+from dataclasses import asdict, astuple, dataclass
 from datetime import datetime
 
 PAGINATION_SIZE = 10
@@ -58,18 +58,29 @@ class CaptureRow:
 
 def process_row(row) -> CaptureRow:
     result = json.loads(row["result"])
-    objects = [{ "label": label, "score": float(score), "box": box, } for label, score, box in zip(result["labels"], result["scores"], result["boxes"])]
+    objects = [
+        {
+            "label": label,
+            "score": float(score),
+            "box": box,
+        }
+        for label, score, box in zip(
+            result["labels"], result["scores"], result["boxes"]
+        )
+    ]
     objects.sort(key=lambda item: item["score"], reverse=True)
     return CaptureRow(
         objects=objects,
         run=row["created_at"],
         model=row["model"],
         created_by=row["created_by"],
-        timestamp=datetime.fromtimestamp(row["created_at"]).isoformat(sep=" ", timespec="seconds")
+        timestamp=datetime.fromtimestamp(row["created_at"]).isoformat(
+            sep=" ", timespec="seconds"
+        ),
     )
 
 
-class Db():
+class Db:
     def __init__(self, db_url, pagination_size=PAGINATION_SIZE):
         sqlite3.register_adapter(CaptureCreatedBy, CaptureCreatedBy.adapt)
         sqlite3.register_converter("capture_created_by", CaptureCreatedBy.convert)
@@ -98,14 +109,23 @@ class Db():
         self.con.close()
 
     def fetch_captures(self, limit=PAGINATION_SIZE) -> sqlite3.Row:
-        return self.cur.execute("SELECT id, model, result, filename, created_by, created_at FROM captures ORDER BY created_at DESC LIMIT ?", (limit,)).fetchmany()
+        return self.cur.execute(
+            """SELECT id, model, result, filename, created_by, created_at
+               FROM captures
+               ORDER BY created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchmany()
 
     def fetch_captures_processed(self, limit=PAGINATION_SIZE) -> list[tuple]:
         rows = self.fetch_captures(limit)
         return list(map(astuple, map(process_row, rows)))
-    
+
     def fetch_latest_capture(self) -> sqlite3.Row:
-        return self.cur.execute("SELECT id, model, result, filename, created_by, created_at FROM captures ORDER BY created_at DESC LIMIT 1").fetchone()
+        return self.cur.execute(
+            """SELECT id, model, result, filename, created_by, created_at
+               FROM captures
+               ORDER BY created_at DESC LIMIT 1"""
+        ).fetchone()
 
     def fetch_latest_capture_processed(self) -> dict:
         row = self.fetch_latest_capture()
@@ -113,11 +133,16 @@ class Db():
 
     def insert_capture(self, model, result, filename, created_by, created_at) -> None:
         self.cur.execute(
-            "INSERT INTO captures (model, result, filename, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-            (model, result, filename, created_by, created_at)
+            """INSERT INTO captures (model, result, filename, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (model, result, filename, created_by, created_at),
         )
         self.con.commit()
 
     def fetch_image(self, created_at) -> sqlite3.Row:
-        return self.cur.execute("SELECT filename FROM captures WHERE created_at = ?", (created_at,)).fetchone()
-
+        return self.cur.execute(
+            """SELECT filename
+               FROM captures
+               WHERE created_at = ?""",
+            (created_at,),
+        ).fetchone()
