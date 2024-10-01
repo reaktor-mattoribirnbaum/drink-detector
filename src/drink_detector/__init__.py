@@ -16,6 +16,7 @@ def _sig_handler(*_: any) -> None:
     app.feed_shutdown_event.set()
     if app.capture_loop_task is not None:
         app.capture_loop_task.cancel()
+    app.process_pool_executor.shutdown()
 
 
 def process_pool_stopper() -> None:

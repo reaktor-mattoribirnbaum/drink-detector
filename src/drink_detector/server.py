@@ -1,10 +1,19 @@
 import asyncio
+import os
 from asyncio import Event, Task
 from concurrent.futures import ProcessPoolExecutor
 from tempfile import NamedTemporaryFile
 from typing import Optional
 
-from quart import Quart, Response, g, render_template, request, send_from_directory
+from quart import (
+    Quart,
+    Response,
+    abort,
+    g,
+    render_template,
+    request,
+    send_from_directory,
+)
 
 from .broker import FeedBroker, update_check
 from .db import Db
@@ -101,9 +110,11 @@ async def capture_request():
 
 @app.route("/capture_request", methods=["POST"])
 async def capture_request_accept():
-    out_temp = NamedTemporaryFile()
     image = (await request.files)["image"]
+    out_temp = NamedTemporaryFile()
     await image.save(out_temp.name)
+    if os.path.getsize(out_temp.name) == 0:
+        abort(400)
     print("Starting image processing task")
     process_future = asyncio.get_event_loop().run_in_executor(
         app.process_pool_executor,
