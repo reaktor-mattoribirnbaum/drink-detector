@@ -1,12 +1,12 @@
 <div class="ui two column middle aligned grid">
   <div class="left floated column">
-    {% if created_by != None %}
-    <div class="ui {{ created_by.label_type }} ribbon label">
-      <i class="{{ created_by.label_class }}"></i> {{ created_by.title }}
+    {% if not skip_created_by %}
+    <div class="ui {{ capture.created_by.label_type }} ribbon label">
+      <i class="{{ capture.created_by.label_class }} icon"></i> {{ capture.created_by.title }}
     </div>
     {% endif %}
     <span class="ui sub header">
-      Model: {{ model }} 
+      Model: {{ capture.model }} 
     </h2>
   </div>
   <div class="right floated right aligned column">
@@ -16,13 +16,13 @@
     </div>
   </div>
   <div class="sixteen wide column">
-    {% if timestamp != None %}
+    {% if not skip_timestamp %}
     <h3 class="ui sub header">
-      {{ timestamp }}
+      {{ capture.timestamp }}
     </h3>
     {% endif %}
-    <img class="ui image annotations-img" data-src="{{ url_for('image', run=run) }}" src="{{ url_for('image', run=run, annotated=True) }}">
-    <link rel="preload" as="image" href="{{ url_for('image', run=run) }}" />
+    <img class="ui image annotations-img" data-src="{{ url_for('image', run=capture.created_at) }}" src="{{ url_for('image', run=capture.created_at, annotated=True) }}">
+    <link rel="preload" as="image" href="{{ url_for('image', run=capture.created_at) }}" />
   </div>
 </div>
 <table class="ui celled table">
@@ -34,7 +34,7 @@
     </tr>
   </thead>
   <tbody>
-  {% for object in objects %}
+  {% for object in capture.objects %}
     <tr>
       <td><code>{{ object.label }}</code></td>
       <td><code>{{ object.score }}</code></td>

@@ -1,7 +1,8 @@
 import asyncio
 from dataclasses import dataclass
 from functools import partial
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
+from uuid import UUID
 
 from quart import Request, abort, make_response, request
 
@@ -42,7 +43,9 @@ async def return_sse(gen: AsyncGenerator[str, None]) -> Request:
     return res
 
 
-async def _send_feed_updates(broker: FeedBroker, feed_shutdown_event: asyncio.Event):
+async def _send_feed_updates(
+    broker: FeedBroker, feed_shutdown_event: asyncio.Event, uuid: Optional[UUID] = None
+):
     print("Subscribing to feed")
     subscription = broker.subscribe()
     subscription_task: asyncio.Task
@@ -73,5 +76,7 @@ async def _send_feed_updates(broker: FeedBroker, feed_shutdown_event: asyncio.Ev
         cancel_event_task.cancel()
 
 
-def send_feed_updates(broker: FeedBroker, feed_shutdown_event: asyncio.Event):
-    return return_sse(partial(_send_feed_updates, broker, feed_shutdown_event))
+def send_feed_updates(
+    broker: FeedBroker, feed_shutdown_event: asyncio.Event, uuid: Optional[UUID] = None
+):
+    return return_sse(partial(_send_feed_updates, broker, feed_shutdown_event, uuid))

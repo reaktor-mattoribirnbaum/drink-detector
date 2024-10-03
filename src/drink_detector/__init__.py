@@ -2,6 +2,7 @@ import asyncio
 import signal
 
 from .config import Config
+from .db import Db
 from .server import app
 from .tasks import drink_detection
 
@@ -21,6 +22,12 @@ def _sig_handler(*_: any) -> None:
 
 def process_pool_stopper() -> None:
     app.process_pool_executor.shutdown()
+
+
+def init_db():
+    app.config.from_object(Config)
+    db = Db(app.config["DB"])
+    db._init_db_()
 
 
 def run() -> None:

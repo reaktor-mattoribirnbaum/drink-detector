@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import os.path
 from datetime import datetime, timedelta
@@ -11,6 +10,8 @@ from PIL import Image, ImageDraw, ImageFont
 from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
 from drink_detector.db import CaptureCreatedBy, Db
+
+from . import DEVICE
 
 
 def open_capture_device(capture_device: int) -> cv.VideoCapture:
@@ -80,13 +81,11 @@ def setup_model(config):
     )
     query = " ".join(map(lambda key: f"{key}.", query_items.keys()))
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    processor = AutoProcessor.from_pretrained(config["MODEL"])
-    model = AutoModelForZeroShotObjectDetection.from_pretrained(config["MODEL"]).to(
-        device
-    )
-    return (query_items, query, device, processor, model)
+    processor = AutoProcessor.from_pretrained(config["OBJ_DET_MODEL"])
+    model = AutoModelForZeroShotObjectDetection.from_pretrained(
+        config["OBJ_DET_MODEL"]
+    ).to(DEVICE)
+    return (query_items, query, DEVICE, processor, model)
 
 
 def save_results(
@@ -97,16 +96,16 @@ def save_results(
         "labels": result["labels"],
         "boxes": result["boxes"].tolist(),
     }
-    print("Saving results")
+    print("Saving object detection results")
     filename = f"{last_start.isoformat(timespec="seconds")}.png"
 
     orig_image.save(os.path.join(config["ORIG_DIR"], filename))
     image.save(os.path.join(config["ANNO_DIR"], filename))
 
     db.insert_capture(
-        config["MODEL"],
-        json.dumps(result),
-        filename,
+        config["OBJ_DET_MODEL"],
+        result,
+        [filename],
         created_by,
         datetime.now().timestamp(),
     )

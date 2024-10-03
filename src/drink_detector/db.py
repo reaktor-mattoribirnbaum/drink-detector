@@ -1,15 +1,17 @@
 import enum
 import json
 import sqlite3
-from dataclasses import asdict, astuple, dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional, Self
 
 PAGINATION_SIZE = 10
 
 
 class CaptureCreatedBy(enum.Enum):
-    LOOP = "capture_loop", "Capture Loop", "primary", "cog icon"
-    REQUEST = "process_request", "Process Request", "secondary", "file upload icon"
+    LOOP = "capture_loop", "Capture Loop", "olive", "cog"
+    REQUEST = "detection_request", "Detection Request", "green", "file upload"
+    SIMILARITY = "similarity_request", "Similarity Request", "orange", "balance scale"
     OTHER = "", "Unknown", "grey", "question circle icon"
 
     def __new__(cls, *args, **kwargs):
@@ -49,47 +51,80 @@ class CaptureCreatedBy(enum.Enum):
 
 @dataclass
 class CaptureRow:
-    objects: list
-    run: int
     model: str
-    created_by: str
-    timestamp: str
+    result: object
+    filenames: list[str]
+    created_by: CaptureCreatedBy
+    created_at: datetime
+    timestamp: str = field(init=False)
 
-
-def process_row(row) -> CaptureRow:
-    result = json.loads(row["result"])
-    objects = [
-        {
-            "label": label,
-            "score": float(score),
-            "box": box,
-        }
-        for label, score, box in zip(
-            result["labels"], result["scores"], result["boxes"]
-        )
-    ]
-    objects.sort(key=lambda item: item["score"], reverse=True)
-    return CaptureRow(
-        objects=objects,
-        run=row["created_at"],
-        model=row["model"],
-        created_by=row["created_by"],
-        timestamp=datetime.fromtimestamp(row["created_at"]).isoformat(
+    def __post_init__(self):
+        self.timestamp = datetime.fromtimestamp(self.created_at).isoformat(
             sep=" ", timespec="seconds"
-        ),
-    )
+        )
+
+    @staticmethod
+    def row_factory(cursor: sqlite3.Cursor, row: tuple) -> Self:
+        fields = [column[0] for column in cursor.description]
+        row = {key: value for key, value in zip(fields, row)}
+
+        match row.get("created_by"):
+            case CaptureCreatedBy.LOOP | CaptureCreatedBy.REQUEST:
+                cls = DetectionRow
+            case CaptureCreatedBy.SIMILARITY:
+                cls = SimilarityRow
+            case _:
+                cls = CaptureRow
+        return cls(
+            row["model"],
+            json.loads(row["result"]),
+            json.loads(row["filenames"]),
+            row["created_by"],
+            row["created_at"],
+        )
+
+
+@dataclass
+class DetectionRow(CaptureRow):
+    objects: list = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.objects = [
+            {
+                "label": label,
+                "score": float(score),
+                "box": box,
+            }
+            for label, score, box in zip(
+                self.result["labels"], self.result["scores"], self.result["boxes"]
+            )
+        ]
+
+
+@dataclass
+class SimilarityRow(CaptureRow):
+    similarity: float = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.similarity = self.result["similarity"]
 
 
 class Db:
     def __init__(self, db_url, pagination_size=PAGINATION_SIZE):
+        self.pagination_size = pagination_size
         sqlite3.register_adapter(CaptureCreatedBy, CaptureCreatedBy.adapt)
         sqlite3.register_converter("capture_created_by", CaptureCreatedBy.convert)
         db_con = sqlite3.connect(db_url, detect_types=sqlite3.PARSE_DECLTYPES)
-        db_con.row_factory = sqlite3.Row
+        db_con.row_factory = CaptureRow.row_factory
         db_cur = db_con.cursor()
-        db_cur.arraysize = pagination_size
+        self.__init_cur__(db_cur)
         self.con = db_con
         self.cur = db_cur
+
+    def __init_cur__(self, cur: sqlite3.Cursor) -> None:
+        cur.arraysize = self.pagination_size
 
     def _init_db_(self) -> None:
         self.cur.execute(
@@ -97,7 +132,7 @@ class Db:
                 id INTEGER PRIMARY KEY,
                 model TEXT NOT NULL,
                 result TEXT NOT NULL,
-                filename TEXT NOT NULL,
+                filenames TEXT NOT NULL,
                 created_by capture_created_by NOT NULL,
                 created_at INTEGER NOT NULL
             )"""
@@ -108,41 +143,47 @@ class Db:
         self.cur.close()
         self.con.close()
 
-    def fetch_captures(self, limit=PAGINATION_SIZE) -> sqlite3.Row:
+    def fetch_captures(self, limit=PAGINATION_SIZE) -> list[CaptureRow]:
         return self.cur.execute(
-            """SELECT id, model, result, filename, created_by, created_at
+            """SELECT id, model, result, filenames, created_by, created_at
                FROM captures
                ORDER BY created_at DESC LIMIT ?""",
             (limit,),
         ).fetchmany()
 
-    def fetch_captures_processed(self, limit=PAGINATION_SIZE) -> list[tuple]:
-        rows = self.fetch_captures(limit)
-        return list(map(astuple, map(process_row, rows)))
-
-    def fetch_latest_capture(self) -> sqlite3.Row:
+    def fetch_latest_capture(self) -> CaptureRow:
         return self.cur.execute(
-            """SELECT id, model, result, filename, created_by, created_at
+            """SELECT id, model, result, filenames, created_by, created_at
                FROM captures
                ORDER BY created_at DESC LIMIT 1"""
         ).fetchone()
 
-    def fetch_latest_capture_processed(self) -> dict:
-        row = self.fetch_latest_capture()
-        return asdict(process_row(row)) if row is not None else None
-
-    def insert_capture(self, model, result, filename, created_by, created_at) -> None:
+    def insert_capture(
+        self,
+        model: str,
+        result: object,
+        filenames: list[str],
+        created_by: CaptureCreatedBy,
+        created_at: int,
+    ) -> None:
         self.cur.execute(
-            """INSERT INTO captures (model, result, filename, created_by, created_at)
+            """INSERT INTO captures (model, result, filenames, created_by, created_at)
                VALUES (?, ?, ?, ?, ?)""",
-            (model, result, filename, created_by, created_at),
+            (model, json.dumps(result), json.dumps(filenames), created_by, created_at),
         )
         self.con.commit()
 
-    def fetch_image(self, created_at) -> sqlite3.Row:
-        return self.cur.execute(
-            """SELECT filename
+    def fetch_image(self, created_at) -> Optional[list[str]]:
+        # skip the usual row factory
+        cur = self.con.cursor()
+        self.__init_cur__(cur)
+        cur.row_factory = sqlite3.Row
+        row_opt = cur.execute(
+            """SELECT filenames
                FROM captures
                WHERE created_at = ?""",
             (created_at,),
         ).fetchone()
+        if row_opt is not None:
+            return json.loads(row_opt["filenames"])
+        return None

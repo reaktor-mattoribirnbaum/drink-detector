@@ -3,24 +3,53 @@
 {% block title %}Capture Request{% endblock %}
 
 {% block content %}
-<form class="ui form" method="POST" enctype="multipart/form-data" action="{{ url_for('capture_request_accept') }}">
-  <h2 class="ui dividing header">Submit a picture to be processed</h2>
-  <div class="field">
-    <label>Model</label>
-    <input placeholder="{{ model }}" readonly type="text">
-  </div>
-  <div class="field">
-    <label>Image</label>
-    <div class="ui file input required">
-      <input name="image" type="file" required>
+<div class="ui top attached tabular menu">
+  <a class="active item" data-tab="detection">Object Detection</a>
+  <a class="item" data-tab="similarity">Similarity</a>
+</div>
+<div class="ui bottom attached active tab segment" data-tab="detection">
+  <form class="ui form" method="POST" enctype="multipart/form-data" action="{{ url_for('detection_request_accept') }}">
+    <h2 class="ui dividing header">Submit a picture to be checked for objects</h2>
+    <div class="field">
+      <label>Model</label>
+      <input placeholder="{{ obj_det_model }}" readonly type="text">
     </div>
-  </div>
-  <button class="ui button" type="submit">Submit</button>
-</form>
+    <div class="field">
+      <label>Image</label>
+      <div class="ui file input required">
+        <input name="image" type="file" required>
+      </div>
+    </div>
+    <button class="ui button" type="submit">Submit</button>
+  </form>
+</div>
+<div class="ui bottom attached tab segment" data-tab="similarity">
+  <form class="ui form" method="POST" enctype="multipart/form-data" action="{{ url_for('similarity_request_accept') }}">
+    <h2 class="ui dividing header">Submit two pictures to be checked for similarity</h2>
+    <div class="field">
+      <label>Model</label>
+      <input placeholder="{{ img_feat_model }}" readonly type="text">
+    </div>
+    <div class="field">
+      <label>Image 1</label>
+      <div class="ui file input required">
+        <input name="image_1" type="file" required>
+      </div>
+    </div>
+    <div class="field">
+      <label>Image 2</label>
+      <div class="ui file input required">
+        <input name="image_2" type="file" required>
+      </div>
+    </div>
+    <button class="ui button" type="submit">Submit</button>
+  </form>
+</div>
 {% endblock %}
 
 {% block script %}
 <script>
+$(".menu .item").tab();
 const feedEventSource = new EventSource("/feed/sse");
 feedEventSource.onmessage = (event) => {
   $.toast({
