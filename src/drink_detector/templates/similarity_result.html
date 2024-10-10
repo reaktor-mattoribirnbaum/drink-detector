@@ -5,6 +5,32 @@
 {% block content %}
 <div class="ui horizontal equal width basic segments">
   <div class="ui segment">
+    <img class="ui fluid image" src="{{ url_for('image', run=capture_id, ind=0) }}">
+  </div>
+  <div class="ui segment">
+    <img class="ui fluid image" src="{{ url_for('image', run=capture_id, ind=1) }}">
   </div>
 </div>
+<div class="ui center aligned segment" id="similarity">
+  <div class="ui statistic">
+    <div class="value">
+      <div class="ui placeholder">
+        <div class="line"></div>
+      </div>
+    </div>
+    <div class="label">
+      image similarity
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const feedEventSource = initSse("{{ uuid }}");
+feedEventSource.addEventListener("similarity", (event) => {
+  const data = event.data.replace(/^data: /, "");
+  $("#similarity .value").text(data);
+});
+</script>
 {% endblock %}

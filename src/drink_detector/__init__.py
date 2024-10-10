@@ -1,5 +1,6 @@
 import asyncio
 import signal
+from multiprocessing import freeze_support
 
 from .config import Config
 from .db import Db
@@ -15,13 +16,9 @@ def capture():
 def _sig_handler(*_: any) -> None:
     print("Shutting down server")
     app.feed_shutdown_event.set()
-    if app.capture_loop_task is not None:
-        app.capture_loop_task.cancel()
-    app.process_pool_executor.shutdown()
-
-
-def process_pool_stopper() -> None:
-    app.process_pool_executor.shutdown()
+    if app.capture_loop_process is not None:
+        app.capture_loop_stop.set()
+        app.capture_loop_process.cancel()
 
 
 def init_db():
@@ -31,12 +28,14 @@ def init_db():
 
 
 def run() -> None:
+    freeze_support()
     app.config.from_object(Config)
     Config.setup()
     app.run(debug=True)
 
 
 def serve() -> None:
+    freeze_support()
     app.config.from_object(Config)
     Config.setup()
 

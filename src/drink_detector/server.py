@@ -1,10 +1,10 @@
 import asyncio
-import os
-import uuid
-from asyncio import Event, Task
+import multiprocessing
+from asyncio import Event
 from concurrent.futures import ProcessPoolExecutor
-from tempfile import NamedTemporaryFile
+from datetime import datetime
 from typing import Optional
+from uuid import UUID, uuid4
 
 from quart import (
     Quart,
@@ -16,9 +16,9 @@ from quart import (
     send_from_directory,
 )
 
-from .broker import FeedBroker, update_check
-from .db import Db
-from .sse import send_feed_updates
+from .broker import FeedBroker, ServerSentEvent, send_feed_updates, update_check
+from .db import CaptureCreatedBy, CaptureType, Db
+from .files import save_orig
 from .tasks import drink_detection, similarity
 
 app = Quart(__name__)
@@ -43,7 +43,9 @@ app.broker: FeedBroker = FeedBroker()
 app.feed_shutdown_event: Event = Event()
 app.update_now_event: Event = Event()
 app.process_pool_executor: ProcessPoolExecutor = ProcessPoolExecutor()
-app.capture_loop_task: Optional[Task] = None
+app.process_pool_manager: multiprocessing.Manager = multiprocessing.Manager()
+app.capture_loop_process: Optional[asyncio.Future] = None
+app.capture_loop_stop: multiprocessing.Event = app.process_pool_manager.Event()
 
 
 @app.before_serving
@@ -70,7 +72,7 @@ async def render(template_file, **kwargs):
                 ["capture_request_accept", "similarity_request_accept"],
             ),
         ],
-        _capture_task_active=app.capture_loop_task is not None,
+        _capture_task_active=app.capture_loop_process is not None and app.capture_loop_process.is_alive(),
     )
 
 
@@ -87,21 +89,22 @@ async def feed():
 @app.route("/image/<run>/<int:ind>")
 async def image(run, ind):
     db = get_db()
-    filenames = db.fetch_image(run)
-    if filenames is None:
-        abort(404)
-    if len(filenames) <= ind:
-        abort(400)
     if "annotated" in request.args:
+        typ = CaptureType.ANNO
         dir = app.config["ANNO_DIR"]
     else:
+        typ = CaptureType.ORIG
         dir = app.config["ORIG_DIR"]
-    return await send_from_directory(dir, filenames[ind])
+    filename = db.fetch_image_for_capture(run, typ, ind)
+    if filename is None:
+        abort(404)
+    return await send_from_directory(dir, filename)
 
 
-@app.route("/feed/sse")
-async def feed_sse():
-    return await send_feed_updates(app.broker, app.feed_shutdown_event)
+@app.route("/feed/sse", defaults={"uuid":None})
+@app.route("/feed/sse/<uuid:uuid>")
+async def feed_sse(uuid: Optional[UUID]):
+    return await send_feed_updates(app.broker, app.feed_shutdown_event, uuid)
 
 
 @app.route("/history")
@@ -115,28 +118,43 @@ async def history():
 
 @app.route("/request")
 async def request_form():
-    return await render("request_form.html", obj_det_model=app.config["OBJ_DET_MODEL"])
+    return await render(
+        "request_form.html",
+        obj_det_model=app.config["OBJ_DET_MODEL"],
+        img_feat_model=app.config["IMG_FEAT_MODEL"]
+    )
 
 
 @app.route("/detection_request", methods=["POST"])
 async def detection_request_accept():
     image = (await request.files)["image"]
-    out_temp = NamedTemporaryFile()
-    await image.save(out_temp.name)
-    if os.path.getsize(out_temp.name) == 0:
+    db = get_db()
+    dt = datetime.now()
+    try:
+        file_id = await save_orig(db, app.config, image.stream, image.mimetype, dt)
+        capture_id = db.create_capture_with_files(
+            uuid4(),
+            app.config["OBJ_DET_MODEL"],
+            CaptureCreatedBy.REQUEST,
+            dt,
+            [file_id]
+        )
+    except OSError:
         abort(400)
+
     print("Starting image processing task")
     process_future = asyncio.get_event_loop().run_in_executor(
         app.process_pool_executor,
         drink_detection.setup_and_process_image,
-        out_temp.name,
+        capture_id,
+        file_id,
         app.config,
+        dt
     )
 
     def on_done(future):
         print("Finished image processing task")
         app.update_now_event.set()
-        out_temp.close()
         app.background_futures.discard(future)
 
     process_future.add_done_callback(on_done)
@@ -147,41 +165,54 @@ async def detection_request_accept():
 @app.route("/similarity_request", methods=["POST"])
 async def similarity_request_accept():
     files = await request.files
+    db = get_db()
+    dt = datetime.now()
     image_1 = files["image_1"]
     image_2 = files["image_2"]
-    out_temp_1 = NamedTemporaryFile()
-    out_temp_2 = NamedTemporaryFile()
-    await image_1.save(out_temp_1.name)
-    await image_2.save(out_temp_2.name)
-    if os.path.getsize(out_temp_1.name) == 0 or os.path.getsize(out_temp_2.name) == 0:
+    try:
+        img_1_id = await save_orig(db, app.config, image_1.stream, image_1.mimetype, dt, 1)
+        img_2_id = await save_orig(db, app.config, image_2.stream, image_2.mimetype, dt, 2)
+        uuid = uuid4()
+        capture_id = db.create_capture_with_files(
+            uuid,
+            app.config["IMG_FEAT_MODEL"],
+            CaptureCreatedBy.SIMILARITY,
+            dt,
+            [img_1_id, img_2_id]
+        )
+    except OSError:
         abort(400)
-    sse_uuid = uuid.uuid4()
+
     process_future = asyncio.get_event_loop().run_in_executor(
         app.process_pool_executor,
         similarity.find_similarity,
-        image_1.name,
-        image_2.name,
+        img_1_id,
+        img_2_id,
+        capture_id,
         app.config,
     )
 
     def on_done(future):
         print("Finished image similarity task")
-        app.broker.publish(future.result(), sse_uuid)
-        out_temp_1.close()
-        out_temp_2.close()
+        sse = ServerSentEvent(f"{future.result() * 100}%", "similarity")
+        asyncio.create_task(app.broker.publish(sse, uuid))
         app.background_futures.discard(future)
 
     process_future.add_done_callback(on_done)
     app.background_futures.add(process_future)
-    return await render("similarity_result.html"), 202
+    return await render("similarity_result.html", capture_id=capture_id, uuid=uuid), 202
 
 
 @app.route("/capture_loop/on", methods=["PUT"])
 async def capture_loop_on():
-    if app.capture_loop_task is None:
+    if app.capture_loop_process is None or app.capture_loop_process.done():
         print("Starting capture loop")
-        app.capture_loop_task = asyncio.get_event_loop().run_in_executor(
-            app.process_pool_executor, drink_detection.drink_detection, app.config
+        app.capture_loop_stop.clear()
+        app.capture_loop_process = asyncio.get_event_loop().run_in_executor(
+            app.process_pool_executor,
+            drink_detection.drink_detection,
+            app.config,
+            app.capture_loop_stop
         )
         return Response(status=200)
     else:
@@ -190,9 +221,10 @@ async def capture_loop_on():
 
 @app.route("/capture_loop/off", methods=["PUT"])
 async def capture_loop_off():
-    if app.capture_loop_task is None:
+    if app.capture_loop_process is None or app.capture_loop_process.done():
         return Response(status=409)
     else:
         print("Stopping capture loop")
-        app.capture_loop_task.cancel()
+        app.capture_loop_stop.set()
+        app.capture_loop_process.cancel()
         return Response(status=200)

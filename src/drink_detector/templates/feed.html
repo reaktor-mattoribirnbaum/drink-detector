@@ -21,24 +21,6 @@ $(".annotations-checkbox").checkbox({
   }
 });
 
-const feedEventSource = new EventSource("/feed/sse");
-feedEventSource.onmessage = (event) => {
-  $.toast({
-    title: "New capture",
-    message: "Refresh page to display new capture data?",
-    displayTime: 0,
-    actions: [{
-      text: "Yes",
-      icon: "check",
-      class: "green",
-      click: () => {
-        window.location.reload();
-      }
-    }, {
-      icon: "ban",
-      class: "icon red"
-    }]
-  });
-};
+initSse();
 </script>
 {% endblock %}

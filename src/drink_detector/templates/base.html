@@ -5,6 +5,36 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.css">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.js"></script>
+  <script>
+  function initSse(uuid) {
+    const feedEventSource = new EventSource(`/feed/sse${uuid === undefined ? '' : '/' + uuid}`);
+    {% if request.url_rule.endpoint in ["feed", "history"] %}
+    const toastMessage = "Refresh page to display new capture data?";
+    const onClick = () => window.location.reload();
+    {% else %}
+    const toastMessage = "Open feed page to display new capture data?";
+    const onClick = () => window.location = "{{ url_for('feed') }}";
+    {% endif %};
+    feedEventSource.onmessage = (event) => {
+      console.log(event.data, event.event)
+      $.toast({
+        title: "New capture",
+        message: toastMessage,
+        displayTime: 0,
+        actions: [{
+          text: "Yes",
+          icon: "check",
+          class: "green",
+          click: onClick
+        }, {
+          icon: "ban",
+          class: "icon red"
+        }]
+      });
+    };
+    return feedEventSource;
+  }
+  </script>
 </head>
 <body>
   <div class="ui menu">

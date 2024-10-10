@@ -21,8 +21,8 @@
       {{ capture.timestamp }}
     </h3>
     {% endif %}
-    <img class="ui image annotations-img" data-src="{{ url_for('image', run=capture.created_at) }}" src="{{ url_for('image', run=capture.created_at, annotated=True) }}">
-    <link rel="preload" as="image" href="{{ url_for('image', run=capture.created_at) }}" />
+    <img class="ui image annotations-img" data-src="{{ url_for('image', run=capture.id) }}" src="{{ url_for('image', run=capture.id, annotated=True) }}">
+    <link rel="preload" as="image" href="{{ url_for('image', run=capture.id) }}" />
   </div>
 </div>
 <table class="ui celled table">

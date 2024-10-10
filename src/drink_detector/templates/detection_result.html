@@ -15,24 +15,6 @@
 
 {% block script %}
 <script>
-const feedEventSource = new EventSource("/feed/sse");
-feedEventSource.onmessage = (event) => {
-  $.toast({
-    title: "New capture",
-    message: "Open feed page to display new capture data?",
-    displayTime: 0,
-    actions: [{
-      text: "Yes",
-      icon: "check",
-      class: "green",
-      click: () => {
-        window.location = "{{ url_for('feed') }}";
-      }
-    }, {
-      icon: "ban",
-      class: "icon red"
-    }]
-  });
-};
+initSse();
 </script>
 {% endblock %}

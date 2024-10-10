@@ -1,8 +1,10 @@
 import asyncio
+import multiprocessing
 import os
 import os.path
 from datetime import datetime, timedelta
-from time import sleep
+from io import BytesIO
+from uuid import uuid4
 
 import cv2 as cv
 import torch
@@ -10,9 +12,12 @@ from PIL import Image, ImageDraw, ImageFont
 from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
 from drink_detector.db import CaptureCreatedBy, Db
+from drink_detector.files import save_anno, save_raw_orig
 
 from . import DEVICE
 
+IMG_FMT = "PNG"
+IMG_EXT = ".png"
 
 def open_capture_device(capture_device: int) -> cv.VideoCapture:
     cap = cv.VideoCapture(capture_device)
@@ -51,12 +56,16 @@ def process_image(
 
     # only processed one image
     result = results[0]
-    for score, label, box in zip(result["scores"], result["labels"], result["boxes"]):
-        print(
-            f"Detected {label} with confidence "
-            f"{round(score.item(), 3)} at location "
-            f"{box[0]}, {box[1]} to {box[2]}, {box[3]}"
-        )
+    scores_labels_boxes = list(zip(result["scores"], result["labels"], result["boxes"]))
+    if len(scores_labels_boxes) == 0:
+        print("No objects detected")
+    else:
+        for score, label, box in scores_labels_boxes:
+            print(
+                f"Detected {label} with confidence "
+                f"{round(score.item(), 3)} at location "
+                f"{box[0]}, {box[1]} to {box[2]}, {box[3]}"
+            )
 
     font = ImageFont.load_default()
 
@@ -88,34 +97,44 @@ def setup_model(config):
     return (query_items, query, DEVICE, processor, model)
 
 
-def save_results(
-    db: Db, config, orig_image, image, result, last_start, created_by: CaptureCreatedBy
-) -> None:
-    result = {
+def extract_results(result: dict) -> dict:
+    return {
         "scores": result["scores"].tolist(),
         "labels": result["labels"],
         "boxes": result["boxes"].tolist(),
     }
+    
+   
+def save_results(
+    db: Db,
+    config,
+    capture_id,
+    image,
+    ext,
+    result,
+    last_start,
+    created_by: CaptureCreatedBy
+) -> None:
+    result = extract_results(result)
     print("Saving object detection results")
-    filename = f"{last_start.isoformat(timespec="seconds")}.png"
+    file_id = save_anno(db, config, image, ext, last_start)
 
-    orig_image.save(os.path.join(config["ORIG_DIR"], filename))
-    image.save(os.path.join(config["ANNO_DIR"], filename))
-
-    db.insert_capture(
-        config["OBJ_DET_MODEL"],
+    capture_id = db.complete_capture(
+        capture_id,
         result,
-        [filename],
-        created_by,
         datetime.now().timestamp(),
+        [file_id]
     )
 
 
-def setup_and_process_image(orig_image_file: os.PathLike, config):
-    orig_image = Image.open(orig_image_file)
+def setup_and_process_image(capture_id: int, file_id: int, config, dt: datetime):
     db = Db(config["DB"])
+    filename = db.fetch_image_name(file_id)
+    if filename is None:
+        raise Exception(f"couldn't find file: {file_id}")
+    orig_image = Image.open(os.path.join(config["ORIG_DIR"], filename))
+    ext = os.path.splitext(filename)[1]
     (query_items, query, device, processor, model) = setup_model(config)
-    start = datetime.now()
     (image, result) = process_image(
         orig_image.copy(),
         model,
@@ -125,42 +144,81 @@ def setup_and_process_image(orig_image_file: os.PathLike, config):
         processor,
         device,
     )
-    save_results(db, config, orig_image, image, result, start, CaptureCreatedBy.REQUEST)
+    save_results(
+        db,
+        config,
+        capture_id,
+        image,
+        ext,
+        result,
+        dt,
+        CaptureCreatedBy.REQUEST
+    )
 
 
-def drink_detection(config):
-    try:
-        db = Db(config["DB"])
-        print("Opening camera")
-        cap = open_capture_device(config["CAPTURE_DEVICE"])
-        print("Camera interface opened, setting up model")
+def drink_detection(config, stop_event: multiprocessing.Event):
+    async def run():
+        try:
+            db = Db(config["DB"])
+            print("Opening camera")
+            cap = open_capture_device(config["CAPTURE_DEVICE"])
+            print("Camera interface opened, setting up model")
 
-        (query_items, query, device, processor, model) = setup_model(config)
-        print("Model ready")
+            if stop_event.is_set():
+                return
+            (query_items, query, device, processor, model) = setup_model(config)
+            print("Model ready")
 
-        print(f"Starting capture loop at rate of once per {config["RATE"]} seconds")
+            if stop_event.is_set():
+                return
+            print(f"Starting capture loop at rate of once per {config["RATE"]} seconds")
 
-        while True:
-            print("Capturing and processing")
-            last_start = datetime.now()
-            orig_image = capture_image(cap)
-            (image, result) = process_image(
-                orig_image.copy(),
-                model,
-                query,
-                query_items,
-                config["OTHER_COLOR"],
-                processor,
-                device,
-            )
+            while True:
+                if stop_event.is_set():
+                    return
+                print("Capturing and processing")
+                last_start = datetime.now()
+                orig_image = capture_image(cap)
+                if stop_event.is_set():
+                    return
+                (image, result) = process_image(
+                    orig_image.copy(),
+                    model,
+                    query,
+                    query_items,
+                    config["OTHER_COLOR"],
+                    processor,
+                    device,
+                )
+                if stop_event.is_set():
+                    return
 
-            save_results(
-                db, config, orig_image, image, result, last_start, CaptureCreatedBy.LOOP
-            )
+                with BytesIO() as orig_bytes:
+                    orig_image.save(orig_bytes, IMG_FMT)
+                    orig_bytes.seek(0)
+                    orig_file_id = await save_raw_orig(db, config, orig_bytes, IMG_EXT, last_start)
+                if stop_event.is_set():
+                    return
 
-            next = last_start + timedelta(seconds=config["RATE"])
-            rem = max((next - datetime.now()).seconds, 0)
-            print(f"Finished, waiting until next start in {rem} seconds")
-            sleep(rem)
-    except asyncio.CancelledError:
-        print("Capture loop task cancelled")
+                result = extract_results(result)
+                print("Saving object detection results")
+                file_id = save_anno(db, config, image, IMG_EXT, last_start)
+                db.create_completed_capture(
+                    config["OBJ_DET_MODEL"],
+                    CaptureCreatedBy.LOOP,
+                    last_start,
+                    result,
+                    [orig_file_id, file_id]
+                )
+
+                next = last_start + timedelta(seconds=config["RATE"])
+                rem = max((next - datetime.now()).seconds, 0)
+                print(f"Finished, waiting until next start in {rem} seconds")
+                stop_event.wait(rem)
+        except asyncio.CancelledError:
+            print("Capture loop task cancelled")
+        except Exception as e:
+            print(f"Exception raised in capture loop: {e}")
+        finally:
+            print("Ending capture loop")
+    asyncio.run(run())

@@ -6,7 +6,7 @@ from PIL import Image
 from torch.nn.functional import cosine_similarity
 from transformers import pipeline
 
-from drink_detector.db import CaptureCreatedBy, Db
+from drink_detector.db import Db
 
 from . import DEVICE
 
@@ -25,29 +25,27 @@ def process_images(pipe, img_1, img_2):
     return cosine_similarity(torch.Tensor(outputs[0]), torch.Tensor(outputs[1]), dim=1)
 
 
-def save_results(db: Db, config, img_1, img_2, result):
+def save_results(db: Db, config, img_1_id: int, img_2_id: int, capture_id: int, result):
     result = {"similarity": result}
     print("Saving similarity results")
-    now = datetime.now()
-    now_fmt = now.isoformat(timespec="seconds")
 
-    img_1.save(os.path.join(config["ORIG_DIR"]), f"{now_fmt}_1.png")
-    img_2.save(os.path.join(config["ORIG_DIR"]), f"{now_fmt}_2.png")
-
-    db.insert_capture(
-        config["IMG_FEAT_MODEL"],
+    capture_id = db.complete_capture(
+        capture_id,
         result,
-        [img_1, img_2],
-        CaptureCreatedBy.SIMILARITY,
-        now.timestamp(),
+        datetime.now().timestamp()
     )
 
 
-def find_similiarity(img_1_name, img_2_name, config):
-    img_1 = Image.open(img_1_name)
-    img_2 = Image.open(img_2_name)
-    pipe = setup_model(config)
+def find_similarity(img_1_id: int, img_2_id: int, capture_id: int, config) -> float:
     db = Db(config["DB"])
+    img_1_name = db.fetch_image_name(img_1_id)
+    img_2_name = db.fetch_image_name(img_2_id)
+    full_img_1_name = os.path.join(config["ORIG_DIR"], img_1_name)
+    full_img_2_name = os.path.join(config["ORIG_DIR"], img_2_name)
+    img_1 = Image.open(full_img_1_name)
+    img_2 = Image.open(full_img_2_name)
+
+    pipe = setup_model(config)
     result = process_images(pipe, img_1, img_2).item()
-    save_results(db, config, img_1, img_2, result)
+    save_results(db, config, img_1_id, img_2_id, capture_id, result)
     return result
