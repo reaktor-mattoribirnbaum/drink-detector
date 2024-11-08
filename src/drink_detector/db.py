@@ -1,4 +1,5 @@
 import enum
+import functools
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -128,6 +129,15 @@ class DetectionRow(CaptureRow):
             )
         ]
 
+    def object_counts(self):
+        def upsert(counts: dict, label: str) -> dict:
+            if label in counts:
+                counts[label] += 1
+            else:
+                counts[label] = 1
+            return counts
+        return functools.reduce(lambda counts, obj: upsert(counts, obj["label"]), self.objects, {})
+
 
 @dataclass
 class SimilarityRow(CaptureRow):
@@ -149,6 +159,8 @@ class Db:
         db_con = sqlite3.connect(db_url, detect_types=sqlite3.PARSE_DECLTYPES)
         db_con.row_factory = sqlite3.Row
         self.con = db_con
+        # DEBUG
+        # self.con.set_trace_callback(lambda s: print("Query:", s))
 
     def __new_cur__(self) -> sqlite3.Cursor:
         cur = self.con.cursor()
@@ -206,7 +218,10 @@ class Db:
     def close(self) -> None:
         self.con.close()
 
-    def __fetch_captures__(self, limit: int) -> list[CaptureRow]:
+    def __fetch_captures__(self, limit: int, cap_types: Optional[list[CaptureCreatedBy]] = None) -> list[CaptureRow]:
+        if cap_types is None:
+            cap_types = CaptureCreatedBy.__members__.values()
+        caps_type = [c.value for c in cap_types]
         return list(map(
             CaptureRow.from_row,
             self.__new_cur__().execute(
@@ -218,18 +233,19 @@ class Db:
                     LEFT JOIN capture_files cf ON c.id = cf.capture_id
                     LEFT JOIN files f ON cf.file_id = f.id
                     INNER JOIN capture_results r ON c.id = r.capture_id
+                    WHERE c.created_by IN ({", ".join("?" * len(caps_type))})
                     GROUP BY c.id
                     ORDER BY c.created_at DESC LIMIT ?
                 """,
-                (limit,),
+                caps_type + [limit]
             ).fetchmany()))
         
 
-    def fetch_captures(self, limit: int=PAGINATION_SIZE) -> list[CaptureRow]:
-        return self.__fetch_captures__(limit)
+    def fetch_captures(self, limit: int=PAGINATION_SIZE, cap_type: Optional[list[CaptureCreatedBy]] = None) -> list[CaptureRow]:
+        return self.__fetch_captures__(limit, cap_type)
 
-    def fetch_latest_capture(self) -> Optional[CaptureRow]:
-        rows = self.__fetch_captures__(1)
+    def fetch_latest_capture(self, cap_type: Optional[list[CaptureCreatedBy]] = None) -> Optional[CaptureRow]:
+        rows = self.__fetch_captures__(1, cap_type)
         if len(rows) != 1:
             return None
         else:

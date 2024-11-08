@@ -5,6 +5,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.css">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.js"></script>
+  <link href="https://cdn.datatables.net/v/se/dt-2.1.8/b-3.1.2/b-colvis-3.1.2/datatables.min.css" rel="stylesheet">
+  <script src="https://cdn.datatables.net/v/se/dt-2.1.8/b-3.1.2/b-colvis-3.1.2/datatables.min.js"></script>
   <script>
   function initSse(uuid) {
     const feedEventSource = new EventSource(`/feed/sse${uuid === undefined ? '' : '/' + uuid}`);

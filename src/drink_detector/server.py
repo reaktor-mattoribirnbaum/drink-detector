@@ -1,4 +1,5 @@
 import asyncio
+import json
 import multiprocessing
 from asyncio import Event
 from concurrent.futures import ProcessPoolExecutor
@@ -71,6 +72,7 @@ async def render(template_file, **kwargs):
                 "Request",
                 ["capture_request_accept", "similarity_request_accept"],
             ),
+            ("stock", "Stock", [])
         ],
         _capture_task_active=app.capture_loop_process is not None and app.capture_loop_process.is_alive(),
     )
@@ -228,3 +230,29 @@ async def capture_loop_off():
         app.capture_loop_stop.set()
         app.capture_loop_process.cancel()
         return Response(status=200)
+
+@app.route("/stock")
+async def stock():
+    db = get_db()
+    capture = db.fetch_latest_capture([CaptureCreatedBy.LOOP, CaptureCreatedBy.REQUEST])
+    if capture is None:
+        return await render("empty_feed.html")
+    counts = capture.object_counts()
+    return await render(
+        "stock.html",
+        counts=counts,
+        total=sum(counts.values()),
+        query_items=[{ "title": key } for key in app.config["QUERY_ITEMS"]]
+    )
+
+@app.route("/stock/search")
+async def stock_search():
+    query = request.args.get("q") or ""
+    db = get_db()
+    latest = db.fetch_latest_capture([CaptureCreatedBy.LOOP, CaptureCreatedBy.REQUEST])
+    if latest is None:
+        res = []
+    else:
+        res = [{ "title": key, "amount": val } for key, val in latest.object_counts().items() if query in key]
+    print(res)
+    return json.dumps(res)

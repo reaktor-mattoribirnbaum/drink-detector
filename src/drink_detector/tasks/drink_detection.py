@@ -85,16 +85,13 @@ def process_image(
 
 
 def setup_model(config):
-    query_items = dict(
-        map(lambda item: tuple(item.split(":")[0:2]), config["QUERY"].split(","))
-    )
-    query = " ".join(map(lambda key: f"{key}.", query_items.keys()))
+    query = " ".join(map(lambda key: f"{key}.", config["QUERY_ITEMS"].keys()))
 
     processor = AutoProcessor.from_pretrained(config["OBJ_DET_MODEL"])
     model = AutoModelForZeroShotObjectDetection.from_pretrained(
         config["OBJ_DET_MODEL"]
     ).to(DEVICE)
-    return (query_items, query, DEVICE, processor, model)
+    return (config["QUERY_ITEMS"], query, DEVICE, processor, model)
 
 
 def extract_results(result: dict) -> dict:

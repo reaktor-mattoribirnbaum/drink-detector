@@ -29,14 +29,14 @@ def init_db():
 
 def run() -> None:
     freeze_support()
-    app.config.from_object(Config)
+    app.config.from_object(Config())
     Config.setup()
     app.run(debug=True)
 
 
 def serve() -> None:
     freeze_support()
-    app.config.from_object(Config)
+    app.config.from_object(Config())
     Config.setup()
 
     import hypercorn.config
