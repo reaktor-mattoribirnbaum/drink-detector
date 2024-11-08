@@ -26,18 +26,20 @@ def init_db():
     db = Db(app.config["DB"])
     db._init_db_()
 
+def load_config() -> None:
+    app.config.from_object(Config())
+    Config.setup()
+
 
 def run() -> None:
     freeze_support()
-    app.config.from_object(Config())
-    Config.setup()
+    load_config()
     app.run(debug=True)
 
 
 def serve() -> None:
     freeze_support()
-    app.config.from_object(Config())
-    Config.setup()
+    load_config()
 
     import hypercorn.config
     from hypercorn.asyncio import serve

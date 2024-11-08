@@ -46,6 +46,7 @@
     <thead>
       <tr>
         <th>Item</th>
+        <th>Categories</th>
         <th>Amount</th>
       </tr>
     </thead>
@@ -62,19 +63,41 @@ const inventoryTable = $('#inventory table').DataTable({
     dataSrc: ""
   },
   columns: [
-    { data: "title" },
-    { data: "amount" }
+    { data: "title", name: "title" },
+    {
+      data: "categories",
+      name: "categories",
+      render: (data) => data.join(", ")
+    },
+    { data: "amount", name: "amount" }
   ],
   layout: {
     topStart: {
       buttons: [
         "colvis",
         {
-          
+          extend: "collection",
+          name: "category-filters",
+          className: "ui labeled icon button",
+          text: "<i class='filter icon'></i>Filter",
+          buttons: []
         }
       ]
     },
   }
+});
+const categoryFiltersButton = inventoryTable.buttons("category-filters:name");
+inventoryTable.on("draw", () => {
+  const data = inventoryTable.column("categories:name").data().flatten();
+  console.log("data", data)
+  categoryFiltersButton.collectionRebuild(data.unique().map((cat) => {
+    return {
+      text: cat,
+      action: (ele) => {
+        console.log("action", ele);
+      }
+    }
+  }));
 });
 $('.ui.search')
   .search({
@@ -82,7 +105,17 @@ $('.ui.search')
     onResults: ({results}) => {
       console.log('res', results)
       if (results !== undefined) {
-        inventoryTable.search(results.map((res) => res.title).join(",")).draw();
+        const results = results.map((res) => res.title);
+        inventoryTable.search(results.join(",")).draw();
+        const uniqueCategories = $.uniqueSort(results);
+        categoryFiltersButton.collectionRebuild(uniqueCategories.map((cat) => {
+          return {
+            text: cat,
+            action: (ele) => {
+              console.log("action", ele);
+            }
+          }
+        }));
       }
     }
   });

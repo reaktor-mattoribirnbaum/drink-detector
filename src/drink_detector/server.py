@@ -242,7 +242,7 @@ async def stock():
         "stock.html",
         counts=counts,
         total=sum(counts.values()),
-        query_items=[{ "title": key } for key in app.config["QUERY_ITEMS"]]
+        query_items=[{ "title": st["name"] } for st in app.config["STOCK_TYPES"]]
     )
 
 @app.route("/stock/search")
@@ -250,9 +250,16 @@ async def stock_search():
     query = request.args.get("q") or ""
     db = get_db()
     latest = db.fetch_latest_capture([CaptureCreatedBy.LOOP, CaptureCreatedBy.REQUEST])
+    obj_counts = latest.object_counts().items()
+    obj_counts = [(app.config["STOCK_TYPES_BY_QUERY"][key], val) for key, val in obj_counts]
     if latest is None:
         res = []
     else:
-        res = [{ "title": key, "amount": val } for key, val in latest.object_counts().items() if query in key]
+        res = [
+            { "title": st["name"], "amount": val, "categories": st["categories"] }
+            for (st, val)
+            in obj_counts
+            if st is not None and query in st["name"]
+        ]
     print(res)
     return json.dumps(res)

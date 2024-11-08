@@ -1,0 +1,20 @@
+[
+  {
+    "name": "can",
+    "query": "a can",
+    "color": "azure",
+    "categories": ["drink", "alcohol"]
+  },
+  {
+    "name": "bottle",
+    "query": "a bottle",
+    "color": "fuchsia",
+    "categories": ["drink", "tea"]
+  },
+  {
+    "name": "juice box",
+    "query": "a juice box",
+    "color": "tomato",
+    "categories": ["drink", "juice"]
+  }
+]

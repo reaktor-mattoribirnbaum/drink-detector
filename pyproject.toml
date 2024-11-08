@@ -17,6 +17,7 @@ python-dotenv = "^1.0.1"
 hypercorn = "^0.17.3"
 werkzeug = "^3.0.4"
 aiofiles = "^24.1.0"
+jsonschema = "^4.23.0"
 
 [tool.poetry.scripts]
 start = "drink_detector:run"
