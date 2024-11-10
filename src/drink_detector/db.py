@@ -287,7 +287,6 @@ class Db:
                 """,
                 (capture_id, json.dumps(result), created_at),
             )
-            capture_id = cur.lastrowid
             for file_id in files:
                 self.link_file(capture_id, file_id)
             return capture_id

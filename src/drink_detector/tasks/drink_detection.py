@@ -38,7 +38,7 @@ def capture_image(cap) -> Image:
 
 
 def process_image(
-    image: Image, model, query: str, query_items, other_color, processor, device
+    image: Image, model, query: str, query_items: dict[str, str], other_color, processor, device
 ) -> (Image, dict):
     draw = ImageDraw.Draw(image)
 
@@ -85,13 +85,14 @@ def process_image(
 
 
 def setup_model(config):
-    query = " ".join(map(lambda key: f"{key}.", config["QUERY_ITEMS"].keys()))
+    queries = config["STOCK_TYPES_BY_QUERY"]
+    query = " ".join(map(lambda key: f"{key}.", queries.keys()))
 
     processor = AutoProcessor.from_pretrained(config["OBJ_DET_MODEL"])
     model = AutoModelForZeroShotObjectDetection.from_pretrained(
         config["OBJ_DET_MODEL"]
     ).to(DEVICE)
-    return (config["QUERY_ITEMS"], query, DEVICE, processor, model)
+    return (dict([(key, val["color"]) for key, val in queries.items()]), query, DEVICE, processor, model)
 
 
 def extract_results(result: dict) -> dict:
