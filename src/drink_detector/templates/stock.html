@@ -54,8 +54,7 @@ const inventoryTable = $('#inventory table').DataTable({
         {
           extend: "collection",
           name: "category-filters",
-          className: "ui labeled icon button",
-          text: "<i class='filter icon'></i>Filter",
+          text: "<i class='filter icon'></i>Filter Category",
           buttons: categories.map((cat) => {
             return {
               text: cat,
