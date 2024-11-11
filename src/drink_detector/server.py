@@ -237,12 +237,24 @@ async def stock():
     capture = db.fetch_latest_capture([CaptureCreatedBy.LOOP, CaptureCreatedBy.REQUEST])
     if capture is None:
         return await render("empty_feed.html")
-    counts = capture.object_counts()
+    obj_counts = capture.object_counts()
+    total = sum(obj_counts.values())
+    obj_counts = [
+        (app.config["STOCK_TYPES_BY_QUERY"][key], val)
+        for key, val
+        in obj_counts.items()
+    ]
+    rows = [
+        { "title": st["name"], "amount": val, "categories": st["categories"] }
+        for (st, val)
+        in obj_counts
+        if st is not None
+    ]
     return await render(
         "stock.html",
-        counts=counts,
-        total=sum(counts.values()),
-        query_items=[{ "title": st["name"] } for st in app.config["STOCK_TYPES"]]
+        total=total,
+        rows=rows,
+        categories=list(set([cat for row in rows for cat in row["categories"]]))
     )
 
 @app.route("/stock/search")
@@ -255,11 +267,14 @@ async def stock_search():
     if latest is None:
         res = []
     else:
-        res = [
+        unfiltered = [
             { "title": st["name"], "amount": val, "categories": st["categories"] }
             for (st, val)
             in obj_counts
-            if st is not None and query in st["name"]
+            if st is not None
         ]
-    print(res)
-    return json.dumps(res)
+        res = [row for row in unfiltered if query in row["title"]]
+    return json.dumps({
+        "data": res,
+        "categories": list(set([cat for row in unfiltered for cat in row["categories"]]))
+    })

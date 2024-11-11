@@ -50,26 +50,27 @@
         <th>Amount</th>
       </tr>
     </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row["title"] }}</td>
+        <td>{{ row["amount"] }}</td>
+        <td>{{ ", ".join(row["categories"]) }}
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
 </div>
 {% endblock %}
 
 {% block script %}
 <script>
-const queryItems = {{ query_items | tojson }};
+const categories = {{ categories | tojson  }};
 const inventoryTable = $('#inventory table').DataTable({
-  ajax: {
-    url: "{{ url_for('stock_search') }}",
-    dataSrc: ""
-  },
   columns: [
-    { data: "title", name: "title" },
-    {
-      data: "categories",
-      name: "categories",
-      render: (data) => data.join(", ")
-    },
-    { data: "amount", name: "amount" }
+    { data: 0, name: "title" },
+    { data: 1, name: "amount" },
+    { data: 2, name: "categories" },
   ],
   layout: {
     topStart: {
@@ -80,7 +81,23 @@ const inventoryTable = $('#inventory table').DataTable({
           name: "category-filters",
           className: "ui labeled icon button",
           text: "<i class='filter icon'></i>Filter",
-          buttons: []
+          buttons: categories.map((cat) => {
+            return {
+              text: cat,
+              action: function (e, dt, node) {
+                if (this.active()) {
+                  // disable
+                  categoryColumn.search.fixed(cat, null);
+                  this.active(false);
+                } else {
+                  // enable
+                  categoryColumn.search.fixed(cat, cat);
+                  this.active(true);
+                }
+                categoryColumn.draw();
+              }
+            }
+          })
         }
       ]
     },
@@ -88,40 +105,25 @@ const inventoryTable = $('#inventory table').DataTable({
 });
 const categoryFiltersButton = inventoryTable.buttons("category-filters:name");
 const categoryColumn = inventoryTable.column("categories:name");
-inventoryTable.on("draw", () => {
-  const data = categoryColumn.data().flatten();
-  console.log("data", data)
-  categoryFiltersButton.collectionRebuild(data.unique().map((cat) => {
-    return {
-      text: cat,
-      action: (e, dt, node) => {
-        if (node.active()) {
-          // filtering, all categories?
-        }
-        console.log("action", ele);
-      }
-    }
-  }));
-});
-$('.ui.search')
-  .search({
-    source: queryItems,
-    onResults: ({results}) => {
-      console.log('res', results)
-      if (results !== undefined) {
-        const results = results.map((res) => res.title);
-        inventoryTable.search(results.join(",")).draw();
-        const uniqueCategories = $.uniqueSort(results);
-        categoryFiltersButton.collectionRebuild(uniqueCategories.map((cat) => {
-          return {
-            text: cat,
-            action: (ele) => {
-              console.log("action", ele);
-            }
-          }
-        }));
-      }
-    }
-  });
+// $('.ui.search')
+//   .search({
+//     source: queryItems,
+//     onResults: ({results}) => {
+//       console.log('res', results)
+//       if (results !== undefined) {
+//         const results = results.map((res) => res.title);
+//         inventoryTable.search(results.join(",")).draw();
+//         const uniqueCategories = $.uniqueSort(results);
+//         categoryFiltersButton.collectionRebuild(uniqueCategories.map((cat) => {
+//           return {
+//             text: cat,
+//             action: (ele) => {
+//               console.log("action", ele);
+//             }
+//           }
+//         }));
+//       }
+//     }
+//   });
 </script>
 {% endblock %}
