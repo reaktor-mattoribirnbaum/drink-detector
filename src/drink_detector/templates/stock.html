@@ -17,37 +17,12 @@
   <a class="item" data-tab="order">Order Stock</a>
 </div>
 <div class="ui bottom attached active tab segment" data-tab="inventory" id="inventory">
-  <div class="ui secondary menu">
-    <!-- <div class="item"> -->
-      <!-- <div class="ui category search"> -->
-        <!-- <div class="ui icon input"> -->
-          <!-- <input class="prompt" type="text" placeholder="Search inventory"> -->
-          <!-- <i class="search icon"></i> -->
-        <!-- </div> -->
-        <!-- <div class="results"></div> -->
-      <!-- </div> -->
-    <!-- </div> -->
-    <div class="right menu">
-      <div class="item">
-        <button class="ui labeled icon button">
-          <i class="filter icon"></i>
-          Filters
-        </button>
-      </div>
-      <div class="item">
-        <button class="ui labeled icon button">
-          <i class="sort icon"></i>
-          Sort
-        </button>
-      </div>
-    </div>
-  </div>
   <table class="ui celled table">
     <thead>
       <tr>
         <th>Item</th>
-        <th>Categories</th>
         <th>Amount</th>
+        <th>Categories</th>
       </tr>
     </thead>
     <tbody>
@@ -105,25 +80,5 @@ const inventoryTable = $('#inventory table').DataTable({
 });
 const categoryFiltersButton = inventoryTable.buttons("category-filters:name");
 const categoryColumn = inventoryTable.column("categories:name");
-// $('.ui.search')
-//   .search({
-//     source: queryItems,
-//     onResults: ({results}) => {
-//       console.log('res', results)
-//       if (results !== undefined) {
-//         const results = results.map((res) => res.title);
-//         inventoryTable.search(results.join(",")).draw();
-//         const uniqueCategories = $.uniqueSort(results);
-//         categoryFiltersButton.collectionRebuild(uniqueCategories.map((cat) => {
-//           return {
-//             text: cat,
-//             action: (ele) => {
-//               console.log("action", ele);
-//             }
-//           }
-//         }));
-//       }
-//     }
-//   });
 </script>
 {% endblock %}
